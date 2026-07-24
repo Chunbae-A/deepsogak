@@ -8,18 +8,25 @@
 
 ---
 
-## 0. 핵심 발견 — AI-Hub "딥페이크 변조영상"의 정체
+## 0. 핵심 발견 — AI-Hub "딥페이크 변조영상"의 정체와 실제 규모
 
-실제로 검색해보니 "AI-Hub 딥페이크 변조영상(8005)"이라 불렀던 데이터셋은 **KoDF(Korean
-DeepFake Detection Dataset, 고려대·DeepBrainAI 공동 연구, ICCV 2021 발표)와 동일한
-데이터셋**이다. 국내 사용자는 AI-Hub(`aihub.or.kr/aidata/8005`)에서, 해외/국내 상관없이
-논문 공식 페이지(`deepbrainai-research.github.io/kodf`)의 구글 폼을 통해서도 신청할 수 있다.
+"AI-Hub 딥페이크 변조영상"이라 불렀던 데이터셋은 **KoDF(Korean DeepFake Detection Dataset,
+고려대·DeepBrainAI 공동 연구, ICCV 2021 발표)와 동일한 데이터셋**이다. 다만 웹페이지 URL의
+`aidata/8005`는 사람이 보는 화면 번호일 뿐, **`aihubshell` API가 실제로 쓰는 datasetkey는
+`55`**다 — 이번에 `aihubshell -mode l`로 직접 조회해서 확인했다(이 조회는 API 키 없이도
+동작하는 공개 기능이라 로그인 없이 실행 가능).
 
-- **규모**: 실제 영상 62,166개 + 가짜(합성) 영상 175,776개, 피험자 403명
+- **실제 확인된 규모**: zip 파일 **102개, 총 약 2,800GB(≈2.8TB)** — Training/Validation,
+  원본/변조영상/오디오, "탐지방해"(perturbation) 조건까지 세분화되어 있음
 - **인종 구성**: 피험자 403명 중 **395명이 한국인, 8명이 동남아시아인**
 - **합성 방법**: FaceSwap, DeepFaceLab, FSGAN 등 6가지 서로 다른 생성 기법
-- **주의**: 2025년 9월부터 구글 드라이브 링크가 **제한된 기간에만 열리는 방식**으로 운영 중 —
-  승인받으면 즉시 다운로드해야 한다.
+- **전체 파일 목록**: [`scripts/aihub_inventory.py`](scripts/aihub_inventory.py)로 생성한
+  [`data/inventory/55_inventory.md`](data/inventory/55_inventory.md)에 파일명·용량·filekey가
+  전부 정리되어 있다 — **2.8TB를 통째로 받지 말고 이 표에서 filekey를 골라 선택 다운로드할 것**
+  (예: 라벨링데이터(`validate_meta.zip`, 113KB)부터 받아 구조 확인 후, 필요한 변조 방법 1~2종만
+  우선 확보).
+- **주의**: 2025년 9월부터 구글 드라이브 링크가 제한된 기간에만 열리는 방식으로도 병행 운영
+  중이므로, 승인받으면 즉시 다운로드해야 한다.
 
 ---
 
@@ -29,7 +36,7 @@ DeepFake Detection Dataset, 고려대·DeepBrainAI 공동 연구, ICCV 2021 발�
 |---|---|---|---|---|
 | 판별 모델 1차 학습 | FaceForensics++ | 대부분 서구인 | 약 5,000쌍(원본+변조) | 1차 베이스라인 모델 학습 |
 | 판별 모델 1차 학습 | Celeb-DF v2 | 대부분 서구 유명인 | 실제 590 + 가짜 5,639 영상 | 고품질 딥페이크 검출력 보강 |
-| **판별 모델 한국인 파인튜닝 (★핵심)** | **KoDF (=AI-Hub 8005)** | **한국인 98%** | 실제 62,166 + 가짜 175,776 클립 | 한국인 얼굴 파인튜닝 — 본인 얼굴 검증 신뢰도의 근거 |
+| **판별 모델 한국인 파인튜닝 (★핵심)** | **KoDF (=AI-Hub datasetkey 55)** | **한국인 98%** | zip 102개, 약 2.8TB(전체) — filekey 선택 다운로드 권장 | 한국인 얼굴 파인튜닝 — 본인 얼굴 검증 신뢰도의 근거 |
 | 판별 모델 강건성 테스트 | DeeperForensics-1.0 | 26개국·4가지 피부톤 | 영상 60,000개 | 압축·블러·조명 등 왜곡 조건 스트레스 테스트 |
 | 얼굴 유사도 필터 검증(★) | **K-FACE** | **한국인 100%** | 1,000명 × 약 30,000장 | ArcFace 임베딩 한국인 검증·임계값(0.6) 재보정 |
 | 자기 검증(선택) | 팀원 본인 얼굴 소규모 셋 | 한국인(팀 본인) | 팀원 3인 × 다각도 촬영 | 정성적 데모·발표용 검증 |
@@ -42,9 +49,9 @@ DeepFake Detection Dataset, 고려대·DeepBrainAI 공동 연구, ICCV 2021 발�
 |---|---|---|---|
 | FaceForensics++ | https://github.com/ondyari/FaceForensics | 1주 이상 가능 | 없음(구글 폼) |
 | Celeb-DF v2 | https://github.com/yuezunli/celeb-deepfakeforensics | 수일~1주 | 없음 |
-| KoDF (=AI-Hub 8005) | https://aihub.or.kr/aidata/8005 (국내) / https://deepbrainai-research.github.io/kodf/ (구글 폼) | 승인 후 제한 기간 내 즉시 다운로드 | AI-Hub 휴대폰 본인인증 |
+| KoDF (=AI-Hub datasetkey 55) | https://aihub.or.kr/aidata/8005 (국내, 사람 화면 번호) — API에서는 datasetkey **55** 사용 | **셀프서비스**: AI-Hub 가입 + 휴대폰 인증만으로 API 키 즉시 발급(사람 검토 대기 없음) | AI-Hub 휴대폰 본인인증 |
 | DeeperForensics-1.0 | https://github.com/EndlessSora/DeeperForensics-1.0 | 수일 | 가능하면 교육기관 이메일 |
-| K-FACE | https://kface.aihub.or.kr/ | 즉시~수일 | 필요 시 재직/재학증명서 |
+| K-FACE | https://kface.aihub.or.kr/ | **사람 검토 필요** — 재직/재학증명서 + 활용계획서 제출 후 심사 | 재직/재학증명서, 데이터 활용계획서(팀에서 이미 작성 중인 PDF 2건이 이 절차용으로 확인됨) |
 | 자기 검증 셋 | 팀 자체 촬영 | 즉시 | 팀원 개인정보 동의 |
 
 ---
@@ -81,10 +88,25 @@ KoDF 승인이 늦어지면 FF++·Celeb-DF만으로 1차 모델을 완성하고,
 - **validation**: 인물 단위로 겹치지 않게 분리(subject-level split — 안 그러면 성능 과대평가됨)
 - **test**: KoDF test split + DeeperForensics-1.0 전체(강건성) + 팀원 자기 검증 셋(정성적)
 
-## 6. 이 브랜치의 스크립트
+## 6. 무엇이 자동화되고, 무엇이 안 되는가
 
-`scripts/`에 데이터셋별 다운로드 안내 스크립트와 공통 전처리 스크립트를 둔다. 각 데이터셋은
-승인제라 자동 다운로드가 불가능한 경우가 많으므로, 스크립트는 "승인 후 받은 파일을 어디에
-어떻게 두면 되는지"를 안내하는 역할을 겸한다. 실제 원본 데이터(영상·이미지)는 `data/raw`,
-`data/processed`에 두되 용량이 크고 라이선스상 재배포 금지이므로 **git에는 커밋하지 않는다**
-(`.gitignore` 처리).
+| 구분 | 데이터셋 | 자동화 가능 여부 |
+|---|---|---|
+| **완전 자동화(CI로 실행 중)** | KoDF/AI-Hub 파일 목록 조회 | `.github/workflows/update-aihub-inventory.yml`이 매주 자동 실행, API 키 불필요(공개 조회) |
+| **셀프서비스(승인 대기 없음)** | KoDF 실제 파일 다운로드 | `scripts/aihub_download.sh` 실행 — 팀원이 AI-Hub API 키만 발급받으면(가입 즉시) 스크립트로 바로 다운로드 가능 |
+| **사람 검토 필요(자동화 불가)** | FaceForensics++ / Celeb-DF v2 / DeeperForensics-1.0 / K-FACE | 구글 폼 제출 또는 서류(재직증명서 등) 제출 후 담당자가 검토·승인해야 함 — 계정 도용·본인인증 우회가 되므로 대리 진행 불가, 팀원이 직접 신청해야 한다 |
+
+## 7. 이 브랜치의 스크립트
+
+- **`scripts/aihub_inventory.py`**: AI-Hub 데이터셋(기본 datasetkey=55, KoDF)의 파일 트리를
+  조회해 `data/inventory/`에 JSON·마크다운 인벤토리를 생성한다. API 키 불필요, CI에서 매주
+  자동 실행.
+- **`scripts/aihub_download.sh`**: `AIHUB_API_KEY` 환경변수와 filekey 목록을 받아 실제 파일을
+  `data/raw/kodf`에 내려받는다. 사용 전 `data/inventory/55_inventory.md`에서 필요한 filekey를
+  고를 것.
+- **`scripts/setup_dirs.py`**: FF++·Celeb-DF·DeeperForensics·K-FACE·자기 검증 셋을 위한
+  `data/raw|processed/<데이터셋>` 폴더를 만든다(이 4개는 수동 승인 후 이 폴더에 직접 옮겨 담음).
+
+실제 원본 데이터(영상·이미지)는 `data/raw`, `data/processed`에 두되 용량이 크고 라이선스상
+재배포 금지이므로 **git에는 커밋하지 않는다**(`.gitignore` 처리). 인벤토리(파일 목록·크기·
+filekey)만 커밋해 팀이 무엇을 받을 수 있는지 항상 최신 상태로 볼 수 있게 한다.
