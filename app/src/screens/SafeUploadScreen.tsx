@@ -91,7 +91,7 @@ export function SafeUploadScreen({ onCreateProtectedPhoto }: { onCreateProtected
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.surface, alignItems: 'center', paddingHorizontal: spacing.xl, paddingTop: spacing.lg, gap: spacing.md },
-  content: { width: '100%' },
+  content: { flex: 1, width: '100%' },
   contentInner: { gap: spacing.md, paddingBottom: spacing.md },
   headerCopy: { gap: spacing.xs },
   title: { ...typography.title, color: colors.text900 },

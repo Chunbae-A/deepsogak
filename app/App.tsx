@@ -28,43 +28,48 @@ export default function App() {
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar style="dark" />
-      <View style={styles.body}>
-        {tab === 'Protection' && protectionStep === 'upload' && (
-          <SafeUploadScreen
-            onCreateProtectedPhoto={(jobId) => {
-              setProtectionJobId(jobId);
-              setProtectionStep('result');
-            }}
-          />
-        )}
-        {tab === 'Protection' && protectionStep === 'result' && protectionJobId && (
-          <ProtectionResultScreen
-            jobId={protectionJobId}
-            onStartMonitoring={() => {
-              setFlowStep('monitoring');
-              setTab('Monitoring');
-            }}
-          />
-        )}
-        {tab === 'Monitoring' && flowStep === 'monitoring' && (
-          <MonitoringScreen onConfirmCandidates={() => setFlowStep('candidates')} />
-        )}
-        {tab === 'Monitoring' && flowStep === 'candidates' && (
-          <CandidateReviewScreen onConfirmSelection={() => setTab('Report')} />
-        )}
-        {tab === 'Report' && <IncidentReportScreen onConfirmConsent={() => setTab('Protection')} />}
-      </View>
-      <View style={styles.navWrap}>
-        <BottomNav active={tab} onSelect={handleSelectTab} />
-      </View>
-    </SafeAreaView>
+    <View style={styles.webBackdrop}>
+      <SafeAreaView style={styles.safe}>
+        <StatusBar style="dark" />
+        <View style={styles.body}>
+          {tab === 'Protection' && protectionStep === 'upload' && (
+            <SafeUploadScreen
+              onCreateProtectedPhoto={(jobId) => {
+                setProtectionJobId(jobId);
+                setProtectionStep('result');
+              }}
+            />
+          )}
+          {tab === 'Protection' && protectionStep === 'result' && protectionJobId && (
+            <ProtectionResultScreen
+              jobId={protectionJobId}
+              onStartMonitoring={() => {
+                setFlowStep('monitoring');
+                setTab('Monitoring');
+              }}
+            />
+          )}
+          {tab === 'Monitoring' && flowStep === 'monitoring' && (
+            <MonitoringScreen onConfirmCandidates={() => setFlowStep('candidates')} />
+          )}
+          {tab === 'Monitoring' && flowStep === 'candidates' && (
+            <CandidateReviewScreen onConfirmSelection={() => setTab('Report')} />
+          )}
+          {tab === 'Report' && <IncidentReportScreen onConfirmConsent={() => setTab('Protection')} />}
+        </View>
+        <View style={styles.navWrap}>
+          <BottomNav active={tab} onSelect={handleSelectTab} />
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.surface },
+  // 넓은 데스크톱 브라우저에서도 Figma가 의도한 폰 화면 비율을 유지하기 위한 프레임.
+  // 네이티브(iOS/Android)에서는 화면 자체가 이미 이 너비 근처라 영향이 없다.
+  webBackdrop: { flex: 1, alignItems: 'center', backgroundColor: colors.border },
+  safe: { flex: 1, width: '100%', maxWidth: 480, backgroundColor: colors.surface },
   body: { flex: 1 },
   navWrap: { paddingHorizontal: spacing.xl, paddingBottom: spacing.md },
 });
