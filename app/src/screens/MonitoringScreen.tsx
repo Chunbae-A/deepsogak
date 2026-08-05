@@ -1,0 +1,101 @@
+import { useEffect, useState } from 'react';
+import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppBar } from '../components/AppBar';
+import { StatusChip } from '../components/StatusChip';
+import { InfoPanel } from '../components/InfoPanel';
+import { PrimaryButton } from '../components/Button';
+import { colors, radii, spacing, typography } from '../theme';
+import { fetchMonitoringSummary, MonitoringSummary } from '../services/monitoringApi';
+
+const addIcon = require('../../assets/icons/icon-add.png');
+
+export function MonitoringScreen({ onConfirmCandidates }: { onConfirmCandidates: () => void }) {
+  // TODO(백엔드 연동): fetchMonitoringSummary가 목업 대신 실제 API를 호출하게 되면
+  // 로딩/에러 상태도 함께 다뤄야 한다. 지금은 화면 골격만 잡아둔다.
+  const [summary, setSummary] = useState<MonitoringSummary | null>(null);
+
+  useEffect(() => {
+    fetchMonitoringSummary().then(setSummary);
+  }, []);
+
+  if (!summary) return null;
+
+  return (
+    <View style={styles.screen}>
+      <AppBar step="3 / 5" />
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
+        <View style={styles.headerCopy}>
+          <Text style={styles.title}>공개 노출을 확인하고 있어요</Text>
+          <Text style={styles.subtitle}>임의의 점수 대신 실제 공개 탐색 결과만 보여드려요.</Text>
+        </View>
+
+        <StatusChip label={`최근 확인 · ${summary.lastCheckedAt}`} />
+
+        <View style={styles.resultCard}>
+          <Text style={styles.resultLabel}>공개 탐색 결과</Text>
+          <Text style={styles.resultCount}>공개 노출 후보 {summary.totalCandidates}건</Text>
+          {summary.sources.map((r) => (
+            <View key={r.label} style={styles.resultRow}>
+              <Text style={styles.resultRowLabel}>{r.label}</Text>
+              <Text style={styles.resultRowValue}>{r.count}</Text>
+            </View>
+          ))}
+        </View>
+
+        <InfoPanel title="확인하는 공개 영역" body="검색엔진에 색인되거나 접근이 허용된 공개 영역만 확인합니다." />
+        <InfoPanel
+          tone="warning"
+          title="자동 탐색하지 않는 영역"
+          body="비공개 계정과 암호화 메신저는 자동 탐색하지 않습니다."
+        />
+
+        <View style={styles.directReport}>
+          <View style={styles.directReportCopy}>
+            <Text style={styles.directReportTitle}>URL·캡처·파일 직접 제보</Text>
+            <Text style={styles.directReportBody}>제보 자료도 분석 후보에 포함할 수 있어요.</Text>
+          </View>
+          <View style={styles.addButton}>
+            <Image source={addIcon} style={styles.addIcon} resizeMode="contain" />
+          </View>
+        </View>
+      </ScrollView>
+
+      <View style={styles.bottomCta}>
+        <PrimaryButton label={`후보 ${summary.totalCandidates}건 확인`} onPress={onConfirmCandidates} />
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.surface, alignItems: 'center', paddingHorizontal: spacing.xl, paddingTop: spacing.lg, gap: spacing.md },
+  content: { width: '100%' },
+  contentInner: { gap: spacing.md, paddingBottom: spacing.md },
+  headerCopy: { gap: spacing.xs },
+  title: { ...typography.title, color: colors.text900 },
+  subtitle: { ...typography.caption, color: colors.text700 },
+  resultCard: { backgroundColor: colors.navy900, borderRadius: radii.lg, paddingHorizontal: spacing.lg, paddingVertical: 14, gap: spacing.xs },
+  resultLabel: { ...typography.caption, color: colors.blue100 },
+  resultCount: { ...typography.display, color: colors.white, marginBottom: spacing.xs },
+  resultRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', height: 34 },
+  resultRowLabel: { ...typography.caption, color: colors.blue100 },
+  resultRowValue: { ...typography.label, color: colors.white },
+  directReport: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingLeft: spacing.lg,
+    paddingRight: 14,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  directReportCopy: { flex: 1, gap: 2 },
+  directReportTitle: { ...typography.bodyStrong, color: colors.text900 },
+  directReportBody: { ...typography.caption, color: colors.text700 },
+  addButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.blue100, alignItems: 'center', justifyContent: 'center' },
+  addIcon: { width: 18, height: 18 },
+  bottomCta: { width: '100%', paddingBottom: spacing.lg },
+});
