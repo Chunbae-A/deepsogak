@@ -8,17 +8,44 @@ import { PrimaryButton, SecondaryButton } from '../components/Button';
 import { colors, radii, spacing, typography } from '../theme';
 import { ProtectionResult, fetchProtectionResult, saveProtectedPhoto } from '../services/protectionResultApi';
 
-const thumbnail = require('../../assets/icons/thumbnail-blurred.png');
 const protectedIcon = require('../../assets/icons/icon-protected.png');
 
-export function ProtectionResultScreen({ onStartMonitoring }: { onStartMonitoring: () => void }) {
-  // TODO(AI 모델 연동): result는 아직 목업이다. fetchProtectionResult가 실제
-  // 처리 job 결과를 반환하게 되면 로딩/에러 처리를 추가한다.
+export function ProtectionResultScreen({
+  jobId,
+  onStartMonitoring,
+}: {
+  jobId: string;
+  onStartMonitoring: () => void;
+}) {
   const [result, setResult] = useState<ProtectionResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    fetchProtectionResult().then(setResult);
-  }, []);
+    fetchProtectionResult(jobId)
+      .then(setResult)
+      .catch(() => setError('처리 결과를 불러오지 못했습니다.'));
+  }, [jobId]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await saveProtectedPhoto(jobId);
+    } catch {
+      setError('보호사진 저장에 실패했습니다.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (error) {
+    return (
+      <View style={styles.screen}>
+        <AppBar step="2 / 5" />
+        <Text style={styles.subtitle}>{error}</Text>
+      </View>
+    );
+  }
 
   if (!result) return null;
 
@@ -35,12 +62,12 @@ export function ProtectionResultScreen({ onStartMonitoring }: { onStartMonitorin
 
         <View style={styles.compareCard}>
           <View style={styles.comparePane}>
-            <Image source={thumbnail} style={styles.previewImage} resizeMode="cover" />
+            <Image source={{ uri: result.originalPhotoUrl }} style={styles.previewImage} resizeMode="cover" />
             <Text style={styles.paneLabel}>{result.originalLabel}</Text>
           </View>
           <View style={styles.comparePane}>
             <View style={styles.protectedPreviewWrap}>
-              <Image source={thumbnail} style={styles.previewImage} resizeMode="cover" />
+              <Image source={{ uri: result.protectedPhotoUrl }} style={styles.previewImage} resizeMode="cover" />
               <View style={styles.protectedBadge}>
                 <Image source={protectedIcon} style={styles.protectedBadgeIcon} resizeMode="contain" />
               </View>
@@ -63,7 +90,7 @@ export function ProtectionResultScreen({ onStartMonitoring }: { onStartMonitorin
       </ScrollView>
 
       <View style={styles.bottomCta}>
-        <PrimaryButton label="보호사진 저장" onPress={() => saveProtectedPhoto()} />
+        <PrimaryButton label={isSaving ? '저장 중...' : '보호사진 저장'} onPress={handleSave} disabled={isSaving} />
         <SecondaryButton label="공개 노출 모니터링 시작" onPress={onStartMonitoring} />
       </View>
     </View>

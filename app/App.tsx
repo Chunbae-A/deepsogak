@@ -39,8 +39,9 @@ export default function App() {
             }}
           />
         )}
-        {tab === 'Protection' && protectionStep === 'result' && (
+        {tab === 'Protection' && protectionStep === 'result' && protectionJobId && (
           <ProtectionResultScreen
+            jobId={protectionJobId}
             onStartMonitoring={() => {
               setFlowStep('monitoring');
               setTab('Monitoring');
