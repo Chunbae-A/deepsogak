@@ -16,17 +16,29 @@ const PROTECTION_FEATURES = [
   'SHA-256·pHash 생성',
 ];
 
-export function SafeUploadScreen({ onCreateProtectedPhoto }: { onCreateProtectedPhoto: () => void }) {
+export function SafeUploadScreen({ onCreateProtectedPhoto }: { onCreateProtectedPhoto: (jobId: string) => void }) {
   const [photo, setPhoto] = useState<SelectedPhoto | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const handleSelectPhoto = () => {
-    pickPhoto().then(setPhoto);
+  const handleSelectPhoto = async () => {
+    setUploadError(null);
+    const selected = await pickPhoto();
+    if (selected) setPhoto(selected);
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!photo) return;
-    startProtection(photo);
-    onCreateProtectedPhoto();
+    setIsUploading(true);
+    setUploadError(null);
+    try {
+      const jobId = await startProtection(photo);
+      onCreateProtectedPhoto(jobId);
+    } catch {
+      setUploadError('업로드에 실패했습니다. 다시 시도해 주세요.');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   return (
@@ -66,8 +78,12 @@ export function SafeUploadScreen({ onCreateProtectedPhoto }: { onCreateProtected
       </ScrollView>
 
       <View style={styles.bottomCta}>
-        <Text style={styles.bottomHint}>사진은 이 기기에서 안전하게 처리됩니다</Text>
-        <PrimaryButton label="보호사진 만들기" onPress={handleCreate} disabled={!photo} />
+        <Text style={styles.bottomHint}>{uploadError ?? '사진은 이 기기에서 안전하게 처리됩니다'}</Text>
+        <PrimaryButton
+          label={isUploading ? '처리 중...' : '보호사진 만들기'}
+          onPress={handleCreate}
+          disabled={!photo || isUploading}
+        />
       </View>
     </View>
   );
