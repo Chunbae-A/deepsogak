@@ -1,0 +1,8 @@
+storage/uploads/*
+storage/protected/*
+storage/saved/*
+!storage/uploads/.gitkeep
+!storage/protected/.gitkeep
+!storage/saved/.gitkeep
+__pycache__/
+*.pyc
