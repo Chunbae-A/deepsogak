@@ -6,7 +6,7 @@ import { MonitoringScreen } from './src/screens/MonitoringScreen';
 import { CandidateReviewScreen } from './src/screens/CandidateReviewScreen';
 import { IncidentReportScreen } from './src/screens/IncidentReportScreen';
 import { SafeUploadScreen } from './src/screens/SafeUploadScreen';
-import { PlaceholderScreen } from './src/screens/PlaceholderScreen';
+import { ProtectionResultScreen } from './src/screens/ProtectionResultScreen';
 import { colors, spacing } from './src/theme';
 
 // 얼굴가드(모니터링→후보검토)와 딥백신(안전업로드→보호결과)은 각각 별도 탭으로
@@ -34,7 +34,12 @@ export default function App() {
           <SafeUploadScreen onCreateProtectedPhoto={() => setProtectionStep('result')} />
         )}
         {tab === 'Protection' && protectionStep === 'result' && (
-          <PlaceholderScreen step="2 / 5" title="보호사진 생성 완료" />
+          <ProtectionResultScreen
+            onStartMonitoring={() => {
+              setFlowStep('monitoring');
+              setTab('Monitoring');
+            }}
+          />
         )}
         {tab === 'Monitoring' && flowStep === 'monitoring' && (
           <MonitoringScreen onConfirmCandidates={() => setFlowStep('candidates')} />
