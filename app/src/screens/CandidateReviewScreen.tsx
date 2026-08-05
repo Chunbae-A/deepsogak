@@ -9,14 +9,24 @@ import { colors, spacing, typography } from '../theme';
 import { Candidate, fetchCandidates, confirmCandidateSelection } from '../services/candidateApi';
 
 export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelection: () => void }) {
-  // TODO(AI 모델 연동): candidates는 아직 목업이다. fetchCandidates가 실제
-  // ArcFace·EfficientNet-B4 결과를 반환하게 되면 로딩/에러 처리를 추가한다.
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchCandidates().then(setCandidates);
+    fetchCandidates()
+      .then(setCandidates)
+      .catch(() => setError('후보 목록을 불러오지 못했습니다.'));
   }, []);
+
+  if (error) {
+    return (
+      <View style={styles.screen}>
+        <AppBar step="4 / 5" />
+        <Text style={styles.subtitle}>{error}</Text>
+      </View>
+    );
+  }
 
   if (!candidates) return null;
 
@@ -31,7 +41,7 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
 
   const handleConfirm = () => {
     const keepIds = candidates.filter((c) => !excludedIds.has(c.id)).map((c) => c.id);
-    confirmCandidateSelection(keepIds);
+    confirmCandidateSelection(keepIds).catch(() => {});
     onConfirmSelection();
   };
 

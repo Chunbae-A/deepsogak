@@ -10,13 +10,23 @@ import { fetchMonitoringSummary, MonitoringSummary } from '../services/monitorin
 const addIcon = require('../../assets/icons/icon-add.png');
 
 export function MonitoringScreen({ onConfirmCandidates }: { onConfirmCandidates: () => void }) {
-  // TODO(백엔드 연동): fetchMonitoringSummary가 목업 대신 실제 API를 호출하게 되면
-  // 로딩/에러 상태도 함께 다뤄야 한다. 지금은 화면 골격만 잡아둔다.
   const [summary, setSummary] = useState<MonitoringSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchMonitoringSummary().then(setSummary);
+    fetchMonitoringSummary()
+      .then(setSummary)
+      .catch(() => setError('모니터링 결과를 불러오지 못했습니다.'));
   }, []);
+
+  if (error) {
+    return (
+      <View style={styles.screen}>
+        <AppBar step="3 / 5" />
+        <Text style={styles.subtitle}>{error}</Text>
+      </View>
+    );
+  }
 
   if (!summary) return null;
 
