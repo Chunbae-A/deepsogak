@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { BottomNav, TabKey } from './src/components/BottomNav';
 import { MonitoringScreen } from './src/screens/MonitoringScreen';
 import { CandidateReviewScreen } from './src/screens/CandidateReviewScreen';
+import { IncidentReportScreen } from './src/screens/IncidentReportScreen';
 import { PlaceholderScreen } from './src/screens/PlaceholderScreen';
 import { colors, spacing } from './src/theme';
 
@@ -32,7 +33,7 @@ export default function App() {
         {tab === 'Monitoring' && flowStep === 'candidates' && (
           <CandidateReviewScreen onConfirmSelection={() => setTab('Report')} />
         )}
-        {tab === 'Report' && <PlaceholderScreen step="5 / 5" title="증거·신고서 초안" />}
+        {tab === 'Report' && <IncidentReportScreen onConfirmConsent={() => setTab('Protection')} />}
       </View>
       <View style={styles.navWrap}>
         <BottomNav active={tab} onSelect={handleSelectTab} />
