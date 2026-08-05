@@ -9,11 +9,13 @@ type CandidateRowProps = {
   risk: string;
   excluded: boolean;
   onToggleExclude: () => void;
+  /** Figma: 검토 목록에서 가장 위험도가 높은 후보를 파란 테두리로 강조 표시 */
+  highlighted?: boolean;
 };
 
-export function CandidateRow({ candidate, similarity, risk, excluded, onToggleExclude }: CandidateRowProps) {
+export function CandidateRow({ candidate, similarity, risk, excluded, onToggleExclude, highlighted }: CandidateRowProps) {
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, highlighted && styles.rowHighlighted]}>
       <Image source={thumbnail} style={styles.thumbnail} resizeMode="cover" />
       <View style={styles.info}>
         <Text style={styles.candidate}>{candidate}</Text>
@@ -40,6 +42,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     width: '100%',
   },
+  rowHighlighted: { borderWidth: 2, borderColor: colors.blue600 },
   thumbnail: { width: 72, height: 72, borderRadius: radii.md },
   info: { flex: 1, gap: 2 },
   candidate: { ...typography.bodyStrong, color: colors.text900 },

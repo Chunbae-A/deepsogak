@@ -3,22 +3,39 @@ import { SafeAreaView, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { BottomNav, TabKey } from './src/components/BottomNav';
 import { MonitoringScreen } from './src/screens/MonitoringScreen';
+import { CandidateReviewScreen } from './src/screens/CandidateReviewScreen';
 import { PlaceholderScreen } from './src/screens/PlaceholderScreen';
 import { colors, spacing } from './src/theme';
 
+// 얼굴가드(모니터링→후보검토)는 신고자료 탭으로 넘어가기 전까지 이 안에서 진행되는
+// 하나의 흐름이라, 별도 스택 없이 로컬 스텝으로만 관리한다. 화면이 더 늘어나면
+// react-navigation 스택으로 옮긴다.
+type MonitoringFlowStep = 'monitoring' | 'candidates';
+
 export default function App() {
   const [tab, setTab] = useState<TabKey>('Monitoring');
+  const [flowStep, setFlowStep] = useState<MonitoringFlowStep>('monitoring');
+
+  const handleSelectTab = (next: TabKey) => {
+    if (next === 'Monitoring') setFlowStep('monitoring');
+    setTab(next);
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="dark" />
       <View style={styles.body}>
         {tab === 'Protection' && <PlaceholderScreen step="1 / 5" title="딥백신 — 안전 업로드" />}
-        {tab === 'Monitoring' && <MonitoringScreen onConfirmCandidates={() => setTab('Report')} />}
+        {tab === 'Monitoring' && flowStep === 'monitoring' && (
+          <MonitoringScreen onConfirmCandidates={() => setFlowStep('candidates')} />
+        )}
+        {tab === 'Monitoring' && flowStep === 'candidates' && (
+          <CandidateReviewScreen onConfirmSelection={() => setTab('Report')} />
+        )}
         {tab === 'Report' && <PlaceholderScreen step="5 / 5" title="증거·신고서 초안" />}
       </View>
       <View style={styles.navWrap}>
-        <BottomNav active={tab} onSelect={setTab} />
+        <BottomNav active={tab} onSelect={handleSelectTab} />
       </View>
     </SafeAreaView>
   );
