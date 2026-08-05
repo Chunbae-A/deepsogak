@@ -111,11 +111,12 @@ def save_protection(jobId: str):
 @app.get("/api/monitoring/summary")
 def get_monitoring_summary():
     return {
-        "lastCheckedAt": "방금 전",
-        "totalCandidates": 3,
+        "lastCheckedAt": "2026.08.02 14:32",
+        "totalCandidates": 6,
         "sources": [
-            {"name": "이미지 검색", "count": 2},
-            {"name": "SNS 공개 게시물", "count": 1},
+            {"label": "검색엔진", "count": "3건"},
+            {"label": "공개 SNS", "count": "2건"},
+            {"label": "기타 웹사이트", "count": "1건"},
         ],
     }
 

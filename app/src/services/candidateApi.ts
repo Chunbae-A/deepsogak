@@ -1,14 +1,9 @@
-// ---------------------------------------------------------------------------
-// TODO(AI 모델 연동): 지금은 목업 후보 3건을 반환한다.
-// 실제 연동 시 이 함수 내부만 아래 API 호출로 교체하면 된다 (화면 쪽 코드는 그대로 둠).
-//
-//   GET {FASTAPI_BASE_URL}/api/monitoring/candidates
-//   - similarityPercent: ArcFace 임베딩 코사인 유사도(0~1)를 %로 변환한 값.
-//     서버에서 이미 임계값(≥0.6)을 넘긴 후보만 내려준다.
-//   - riskLabel / riskLevel: EfficientNet-B4 딥페이크 판별 결과를 사람이 읽는 문구로 변환한 것.
-//     신뢰도 구간은 기획서 기준 85%↑ 높음 / 60~84% 중간(확인요청) / 60%↓ 낮음(로그만)이다.
-//   - 정렬은 서버가 위험도 내림차순으로 내려준다고 가정한다(첫 후보 = highlighted).
-// ---------------------------------------------------------------------------
+import { API_BASE_URL } from '../config';
+
+// server/main.py의 /api/monitoring/candidates가 응답을 만든다. similarityPercent(ArcFace
+// 코사인 유사도)와 riskLabel/riskLevel(EfficientNet-B4 딥페이크 판별)은 아직 모델이
+// 없어 서버도 고정된 시뮬레이션 데이터를 반환한다 — 진짜 모델이 붙으면
+// server/main.py의 get_candidates 내부만 교체하면 된다.
 
 export type RiskLevel = 'high' | 'medium' | 'low' | 'exclude-recommended';
 
@@ -20,26 +15,18 @@ export type Candidate = {
   riskLevel: RiskLevel;
 };
 
-const MOCK_CANDIDATES: Candidate[] = [
-  { id: 'c1', label: '후보 1', similarityPercent: 92, riskLabel: '딥페이크 위험도 · 높음', riskLevel: 'high' },
-  { id: 'c2', label: '후보 2', similarityPercent: 71, riskLabel: '딥페이크 위험도 · 낮음', riskLevel: 'low' },
-  { id: 'c3', label: '후보 3', similarityPercent: 38, riskLabel: '제외 권장', riskLevel: 'exclude-recommended' },
-];
-
 export async function fetchCandidates(): Promise<Candidate[]> {
-  // TODO: 실제 연동 시 아래로 교체
-  //   const res = await fetch(`${FASTAPI_BASE_URL}/api/monitoring/candidates`, {
-  //     headers: { Authorization: `Bearer ${sessionToken}` },
-  //   });
-  //   if (!res.ok) throw new Error('후보 목록을 불러오지 못했습니다.');
-  //   return res.json();
-  return MOCK_CANDIDATES;
+  const res = await fetch(`${API_BASE_URL}/api/monitoring/candidates`);
+  if (!res.ok) throw new Error('후보 목록을 불러오지 못했습니다.');
+  return res.json();
 }
 
-// TODO(AI 모델 연동): 사용자가 "제외"하지 않은 후보 id 목록을 서버에 알려
-// 실제 신고서 생성(RAG) 단계로 넘길 때 이 함수를 호출한다.
-//   POST {FASTAPI_BASE_URL}/api/monitoring/candidates/confirm  { keepIds: string[] }
+// 사용자가 "제외"하지 않은 후보 id 목록을 서버에 알려 다음 단계(신고서 초안)로 넘긴다.
 export async function confirmCandidateSelection(keepIds: string[]): Promise<void> {
-  // TODO: 실제 연동 시 fetch POST로 교체. 지금은 no-op.
-  void keepIds;
+  const res = await fetch(`${API_BASE_URL}/api/monitoring/candidates/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keepIds }),
+  });
+  if (!res.ok) throw new Error('후보 선택을 저장하지 못했습니다.');
 }

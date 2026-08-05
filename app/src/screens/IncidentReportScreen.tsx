@@ -10,18 +10,28 @@ import { EvidenceField, fetchEvidenceDraft, submitConsent } from '../services/re
 const editIcon = require('../../assets/icons/icon-edit.png');
 
 export function IncidentReportScreen({ onConfirmConsent }: { onConfirmConsent: () => void }) {
-  // TODO(AI 모델 연동): draft는 아직 목업이다. fetchEvidenceDraft가 실제
-  // 해시/C2PA/AI 분석 결과를 반환하게 되면 로딩/에러 처리를 추가한다.
   const [draft, setDraft] = useState<EvidenceField[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchEvidenceDraft().then(setDraft);
+    fetchEvidenceDraft()
+      .then(setDraft)
+      .catch(() => setError('증거 초안을 불러오지 못했습니다.'));
   }, []);
+
+  if (error) {
+    return (
+      <View style={styles.screen}>
+        <AppBar step="5 / 5" />
+        <Text style={styles.subtitle}>{error}</Text>
+      </View>
+    );
+  }
 
   if (!draft) return null;
 
   const handleConfirm = () => {
-    submitConsent();
+    submitConsent().catch(() => {});
     onConfirmConsent();
   };
 
