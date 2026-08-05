@@ -23,8 +23,12 @@ export function SafeUploadScreen({ onCreateProtectedPhoto }: { onCreateProtected
 
   const handleSelectPhoto = async () => {
     setUploadError(null);
-    const selected = await pickPhoto();
-    if (selected) setPhoto(selected);
+    const result = await pickPhoto();
+    if (result.status === 'selected') {
+      setPhoto(result.photo);
+    } else if (result.status === 'permission-denied') {
+      setUploadError('사진 접근 권한이 없어 선택할 수 없습니다.');
+    }
   };
 
   const handleCreate = async () => {
