@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppBar } from '../components/AppBar';
 import { StatusChip } from '../components/StatusChip';
 import { CheckRow } from '../components/CheckRow';
 import { InfoPanel } from '../components/InfoPanel';
 import { PrimaryButton, SecondaryButton } from '../components/Button';
+import { LoadingView, ErrorView } from '../components/ScreenStatus';
 import { colors, radii, spacing, typography } from '../theme';
 import { ProtectionResult, fetchProtectionResult, saveProtectedPhoto } from '../services/protectionResultApi';
 
@@ -20,79 +21,91 @@ export function ProtectionResultScreen({
   const [result, setResult] = useState<ProtectionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    let cancelled = false;
+    setError(null);
+    setResult(null);
     fetchProtectionResult(jobId)
-      .then(setResult)
-      .catch(() => setError('처리 결과를 불러오지 못했습니다.'));
+      .then((data) => {
+        if (!cancelled) setResult(data);
+      })
+      .catch(() => {
+        if (!cancelled) setError('처리 결과를 불러오지 못했습니다.');
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [jobId]);
+
+  useEffect(() => load(), [load]);
 
   const handleSave = async () => {
     setIsSaving(true);
+    setSaveError(null);
     try {
       await saveProtectedPhoto(jobId);
     } catch {
-      setError('보호사진 저장에 실패했습니다.');
+      setSaveError('보호사진 저장에 실패했습니다.');
     } finally {
       setIsSaving(false);
     }
   };
 
-  if (error) {
-    return (
-      <View style={styles.screen}>
-        <AppBar step="2 / 5" />
-        <Text style={styles.subtitle}>{error}</Text>
-      </View>
-    );
-  }
-
-  if (!result) return null;
-
   return (
     <View style={styles.screen}>
       <AppBar step="2 / 5" />
-      <ScrollView style={styles.content} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
-        <View style={styles.headerCopy}>
-          <Text style={styles.title}>보호사진이 준비됐어요</Text>
-          <Text style={styles.subtitle}>원본은 그대로, 게시용 보호본만 안전하게 만들었습니다.</Text>
-        </View>
+      {error ? (
+        <ErrorView message={error} onRetry={load} />
+      ) : !result ? (
+        <LoadingView />
+      ) : (
+        <>
+          <ScrollView style={styles.content} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
+            <View style={styles.headerCopy}>
+              <Text style={styles.title}>보호사진이 준비됐어요</Text>
+              <Text style={styles.subtitle}>원본은 그대로, 게시용 보호본만 안전하게 만들었습니다.</Text>
+            </View>
 
-        <StatusChip label="보호 생성 완료" />
+            <StatusChip label="보호 생성 완료" />
 
-        <View style={styles.compareCard}>
-          <View style={styles.comparePane}>
-            <Image source={{ uri: result.originalPhotoUrl }} style={styles.previewImage} resizeMode="cover" />
-            <Text style={styles.paneLabel}>{result.originalLabel}</Text>
-          </View>
-          <View style={styles.comparePane}>
-            <View style={styles.protectedPreviewWrap}>
-              <Image source={{ uri: result.protectedPhotoUrl }} style={styles.previewImage} resizeMode="cover" />
-              <View style={styles.protectedBadge}>
-                <Image source={protectedIcon} style={styles.protectedBadgeIcon} resizeMode="contain" />
+            <View style={styles.compareCard}>
+              <View style={styles.comparePane}>
+                <Image source={{ uri: result.originalPhotoUrl }} style={styles.previewImage} resizeMode="cover" />
+                <Text style={styles.paneLabel}>{result.originalLabel}</Text>
+              </View>
+              <View style={styles.comparePane}>
+                <View style={styles.protectedPreviewWrap}>
+                  <Image source={{ uri: result.protectedPhotoUrl }} style={styles.previewImage} resizeMode="cover" />
+                  <View style={styles.protectedBadge}>
+                    <Image source={protectedIcon} style={styles.protectedBadgeIcon} resizeMode="contain" />
+                  </View>
+                </View>
+                <Text style={styles.paneLabelProtected}>{result.protectedLabel}</Text>
               </View>
             </View>
-            <Text style={styles.paneLabelProtected}>{result.protectedLabel}</Text>
+
+            <View style={styles.resultsCard}>
+              <Text style={styles.resultsTitle}>적용 결과</Text>
+              {result.appliedChecks.map((label) => (
+                <CheckRow key={label} label={label} />
+              ))}
+            </View>
+
+            <InfoPanel
+              title="중요한 한계"
+              body="딥페이크 생성을 100% 차단하지는 않습니다. 게시 후 공개 노출 모니터링을 함께 사용하세요."
+            />
+          </ScrollView>
+
+          <View style={styles.bottomCta}>
+            {saveError && <Text style={styles.saveError}>{saveError}</Text>}
+            <PrimaryButton label={isSaving ? '저장 중...' : '보호사진 저장'} onPress={handleSave} disabled={isSaving} />
+            <SecondaryButton label="공개 노출 모니터링 시작" onPress={onStartMonitoring} />
           </View>
-        </View>
-
-        <View style={styles.resultsCard}>
-          <Text style={styles.resultsTitle}>적용 결과</Text>
-          {result.appliedChecks.map((label) => (
-            <CheckRow key={label} label={label} />
-          ))}
-        </View>
-
-        <InfoPanel
-          title="중요한 한계"
-          body="딥페이크 생성을 100% 차단하지는 않습니다. 게시 후 공개 노출 모니터링을 함께 사용하세요."
-        />
-      </ScrollView>
-
-      <View style={styles.bottomCta}>
-        <PrimaryButton label={isSaving ? '저장 중...' : '보호사진 저장'} onPress={handleSave} disabled={isSaving} />
-        <SecondaryButton label="공개 노출 모니터링 시작" onPress={onStartMonitoring} />
-      </View>
+        </>
+      )}
     </View>
   );
 }
@@ -142,4 +155,5 @@ const styles = StyleSheet.create({
   },
   resultsTitle: { ...typography.bodyStrong, color: colors.text900 },
   bottomCta: { width: '100%', paddingBottom: spacing.lg, gap: spacing.sm },
+  saveError: { ...typography.caption, color: colors.amber600, textAlign: 'center' },
 });

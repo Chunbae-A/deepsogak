@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppBar } from '../components/AppBar';
 import { StatusChip } from '../components/StatusChip';
 import { InfoPanel } from '../components/InfoPanel';
 import { CandidateRow } from '../components/CandidateRow';
 import { PrimaryButton } from '../components/Button';
+import { LoadingView, ErrorView } from '../components/ScreenStatus';
 import { colors, spacing, typography } from '../theme';
 import { Candidate, fetchCandidates, confirmCandidateSelection } from '../services/candidateApi';
 
@@ -13,22 +14,23 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    let cancelled = false;
+    setError(null);
+    setCandidates(null);
     fetchCandidates()
-      .then(setCandidates)
-      .catch(() => setError('후보 목록을 불러오지 못했습니다.'));
+      .then((data) => {
+        if (!cancelled) setCandidates(data);
+      })
+      .catch(() => {
+        if (!cancelled) setError('후보 목록을 불러오지 못했습니다.');
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  if (error) {
-    return (
-      <View style={styles.screen}>
-        <AppBar step="4 / 5" />
-        <Text style={styles.subtitle}>{error}</Text>
-      </View>
-    );
-  }
-
-  if (!candidates) return null;
+  useEffect(() => load(), [load]);
 
   const toggleExclude = (id: string) => {
     setExcludedIds((prev) => {
@@ -40,6 +42,7 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
   };
 
   const handleConfirm = () => {
+    if (!candidates) return;
     const keepIds = candidates.filter((c) => !excludedIds.has(c.id)).map((c) => c.id);
     confirmCandidateSelection(keepIds).catch(() => {});
     onConfirmSelection();
@@ -48,37 +51,45 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
   return (
     <View style={styles.screen}>
       <AppBar step="4 / 5" />
-      <ScrollView style={styles.content} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
-        <View style={styles.headerCopy}>
-          <Text style={styles.title}>의심 후보를 검토해 주세요</Text>
-          <Text style={styles.subtitle}>유사도와 합성 위험 신호를 분리해 확인합니다.</Text>
-        </View>
+      {error ? (
+        <ErrorView message={error} onRetry={load} />
+      ) : !candidates ? (
+        <LoadingView />
+      ) : (
+        <>
+          <ScrollView style={styles.content} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
+            <View style={styles.headerCopy}>
+              <Text style={styles.title}>의심 후보를 검토해 주세요</Text>
+              <Text style={styles.subtitle}>유사도와 합성 위험 신호를 분리해 확인합니다.</Text>
+            </View>
 
-        <StatusChip label={`검토 후보 ${candidates.length}건`} />
+            <StatusChip label={`검토 후보 ${candidates.length}건`} />
 
-        <View style={styles.list}>
-          {candidates.map((c, index) => (
-            <CandidateRow
-              key={c.id}
-              candidate={c.label}
-              similarity={`얼굴 유사도 ${c.similarityPercent}%`}
-              risk={c.riskLabel}
-              excluded={excludedIds.has(c.id)}
-              onToggleExclude={() => toggleExclude(c.id)}
-              highlighted={index === 0}
+            <View style={styles.list}>
+              {candidates.map((c, index) => (
+                <CandidateRow
+                  key={c.id}
+                  candidate={c.label}
+                  similarity={`얼굴 유사도 ${c.similarityPercent}%`}
+                  risk={c.riskLabel}
+                  excluded={excludedIds.has(c.id)}
+                  onToggleExclude={() => toggleExclude(c.id)}
+                  highlighted={index === 0}
+                />
+              ))}
+            </View>
+
+            <InfoPanel
+              title="얼굴 유사도는 딥페이크 확률이 아닙니다"
+              body="유사도는 동일 인물 가능성만 나타냅니다. 오탐으로 판단되면 각 후보의 '제외'를 선택하세요."
             />
-          ))}
-        </View>
+          </ScrollView>
 
-        <InfoPanel
-          title="얼굴 유사도는 딥페이크 확률이 아닙니다"
-          body="유사도는 동일 인물 가능성만 나타냅니다. 오탐으로 판단되면 각 후보의 '제외'를 선택하세요."
-        />
-      </ScrollView>
-
-      <View style={styles.bottomCta}>
-        <PrimaryButton label="선택 후보 상세 분석" onPress={handleConfirm} />
-      </View>
+          <View style={styles.bottomCta}>
+            <PrimaryButton label="선택 후보 상세 분석" onPress={handleConfirm} />
+          </View>
+        </>
+      )}
     </View>
   );
 }

@@ -9,20 +9,28 @@ export type SelectedPhoto = {
   mimeType: string;
 };
 
-export async function pickPhoto(): Promise<SelectedPhoto | null> {
+export type PickPhotoResult =
+  | { status: 'selected'; photo: SelectedPhoto }
+  | { status: 'cancelled' }
+  | { status: 'permission-denied' };
+
+export async function pickPhoto(): Promise<PickPhotoResult> {
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!permission.granted) return null;
+  if (!permission.granted) return { status: 'permission-denied' };
 
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ImagePicker.MediaTypeOptions.Images,
     quality: 1,
   });
-  if (result.canceled || result.assets.length === 0) return null;
+  if (result.canceled || result.assets.length === 0) return { status: 'cancelled' };
 
   const asset = result.assets[0];
   const fileName = asset.fileName ?? asset.uri.split('/').pop() ?? 'photo.jpg';
   const sizeLabel = asset.fileSize ? `${(asset.fileSize / (1024 * 1024)).toFixed(1)}MB` : '';
-  return { uri: asset.uri, fileName, sizeLabel, mimeType: asset.mimeType ?? 'image/jpeg' };
+  return {
+    status: 'selected',
+    photo: { uri: asset.uri, fileName, sizeLabel, mimeType: asset.mimeType ?? 'image/jpeg' },
+  };
 }
 
 async function buildFormData(photo: SelectedPhoto): Promise<FormData> {

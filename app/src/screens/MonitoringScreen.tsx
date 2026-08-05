@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppBar } from '../components/AppBar';
 import { StatusChip } from '../components/StatusChip';
 import { InfoPanel } from '../components/InfoPanel';
 import { PrimaryButton } from '../components/Button';
+import { LoadingView, ErrorView } from '../components/ScreenStatus';
 import { colors, radii, spacing, typography } from '../theme';
 import { fetchMonitoringSummary, MonitoringSummary } from '../services/monitoringApi';
 
@@ -13,66 +14,75 @@ export function MonitoringScreen({ onConfirmCandidates }: { onConfirmCandidates:
   const [summary, setSummary] = useState<MonitoringSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    let cancelled = false;
+    setError(null);
+    setSummary(null);
     fetchMonitoringSummary()
-      .then(setSummary)
-      .catch(() => setError('모니터링 결과를 불러오지 못했습니다.'));
+      .then((data) => {
+        if (!cancelled) setSummary(data);
+      })
+      .catch(() => {
+        if (!cancelled) setError('모니터링 결과를 불러오지 못했습니다.');
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  if (error) {
-    return (
-      <View style={styles.screen}>
-        <AppBar step="3 / 5" />
-        <Text style={styles.subtitle}>{error}</Text>
-      </View>
-    );
-  }
-
-  if (!summary) return null;
+  useEffect(() => load(), [load]);
 
   return (
     <View style={styles.screen}>
       <AppBar step="3 / 5" />
-      <ScrollView style={styles.content} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
-        <View style={styles.headerCopy}>
-          <Text style={styles.title}>공개 노출을 확인하고 있어요</Text>
-          <Text style={styles.subtitle}>임의의 점수 대신 실제 공개 탐색 결과만 보여드려요.</Text>
-        </View>
-
-        <StatusChip label={`최근 확인 · ${summary.lastCheckedAt}`} />
-
-        <View style={styles.resultCard}>
-          <Text style={styles.resultLabel}>공개 탐색 결과</Text>
-          <Text style={styles.resultCount}>공개 노출 후보 {summary.totalCandidates}건</Text>
-          {summary.sources.map((r) => (
-            <View key={r.label} style={styles.resultRow}>
-              <Text style={styles.resultRowLabel}>{r.label}</Text>
-              <Text style={styles.resultRowValue}>{r.count}</Text>
+      {error ? (
+        <ErrorView message={error} onRetry={load} />
+      ) : !summary ? (
+        <LoadingView />
+      ) : (
+        <>
+          <ScrollView style={styles.content} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
+            <View style={styles.headerCopy}>
+              <Text style={styles.title}>공개 노출을 확인하고 있어요</Text>
+              <Text style={styles.subtitle}>임의의 점수 대신 실제 공개 탐색 결과만 보여드려요.</Text>
             </View>
-          ))}
-        </View>
 
-        <InfoPanel title="확인하는 공개 영역" body="검색엔진에 색인되거나 접근이 허용된 공개 영역만 확인합니다." />
-        <InfoPanel
-          tone="warning"
-          title="자동 탐색하지 않는 영역"
-          body="비공개 계정과 암호화 메신저는 자동 탐색하지 않습니다."
-        />
+            <StatusChip label={`최근 확인 · ${summary.lastCheckedAt}`} />
 
-        <View style={styles.directReport}>
-          <View style={styles.directReportCopy}>
-            <Text style={styles.directReportTitle}>URL·캡처·파일 직접 제보</Text>
-            <Text style={styles.directReportBody}>제보 자료도 분석 후보에 포함할 수 있어요.</Text>
+            <View style={styles.resultCard}>
+              <Text style={styles.resultLabel}>공개 탐색 결과</Text>
+              <Text style={styles.resultCount}>공개 노출 후보 {summary.totalCandidates}건</Text>
+              {summary.sources.map((r) => (
+                <View key={r.label} style={styles.resultRow}>
+                  <Text style={styles.resultRowLabel}>{r.label}</Text>
+                  <Text style={styles.resultRowValue}>{r.count}</Text>
+                </View>
+              ))}
+            </View>
+
+            <InfoPanel title="확인하는 공개 영역" body="검색엔진에 색인되거나 접근이 허용된 공개 영역만 확인합니다." />
+            <InfoPanel
+              tone="warning"
+              title="자동 탐색하지 않는 영역"
+              body="비공개 계정과 암호화 메신저는 자동 탐색하지 않습니다."
+            />
+
+            <View style={styles.directReport}>
+              <View style={styles.directReportCopy}>
+                <Text style={styles.directReportTitle}>URL·캡처·파일 직접 제보</Text>
+                <Text style={styles.directReportBody}>제보 자료도 분석 후보에 포함할 수 있어요.</Text>
+              </View>
+              <View style={styles.addButton}>
+                <Image source={addIcon} style={styles.addIcon} resizeMode="contain" />
+              </View>
+            </View>
+          </ScrollView>
+
+          <View style={styles.bottomCta}>
+            <PrimaryButton label={`후보 ${summary.totalCandidates}건 확인`} onPress={onConfirmCandidates} />
           </View>
-          <View style={styles.addButton}>
-            <Image source={addIcon} style={styles.addIcon} resizeMode="contain" />
-          </View>
-        </View>
-      </ScrollView>
-
-      <View style={styles.bottomCta}>
-        <PrimaryButton label={`후보 ${summary.totalCandidates}건 확인`} onPress={onConfirmCandidates} />
-      </View>
+        </>
+      )}
     </View>
   );
 }

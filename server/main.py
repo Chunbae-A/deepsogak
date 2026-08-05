@@ -11,6 +11,9 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 안전 업로드 화면 안내(최대 20MB)와 동일한 값
+ALLOWED_FORMATS = {"JPEG", "PNG"}
+
 BASE_DIR = Path(__file__).parent
 STORAGE_DIR = BASE_DIR / "storage"
 UPLOADS_DIR = STORAGE_DIR / "uploads"
@@ -35,24 +38,36 @@ JOBS: dict[str, dict] = {}
 @app.post("/api/protection/process")
 async def process_protection(photo: UploadFile):
     raw = await photo.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="빈 파일은 업로드할 수 없습니다.")
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="파일 크기가 20MB를 초과했습니다.")
+
     try:
         image = Image.open(io.BytesIO(raw))
         image.load()
     except Exception:
         raise HTTPException(status_code=400, detail="이미지 파일을 열 수 없습니다.")
 
+    if image.format not in ALLOWED_FORMATS:
+        raise HTTPException(status_code=400, detail="JPG·PNG 형식만 업로드할 수 있습니다.")
+
     job_id = uuid.uuid4().hex[:12]
     ext = "png" if image.format == "PNG" else "jpg"
 
     original_path = UPLOADS_DIR / f"{job_id}_original.{ext}"
-    original_path.write_bytes(raw)
-
-    # EXIF·GPS 메타데이터 제거: 픽셀 데이터만 가진 새 이미지에 다시 담아 저장한다.
-    # TODO(AI 모델 연동): 여기서 딥백신 Beta(적대적 노이즈) 적용을 추가한다.
-    clean_image = Image.new(image.mode, image.size)
-    clean_image.putdata(list(image.getdata()))
     protected_path = PROTECTED_DIR / f"{job_id}_protected.{ext}"
-    clean_image.save(protected_path, format=image.format or "JPEG")
+
+    try:
+        original_path.write_bytes(raw)
+
+        # EXIF·GPS 메타데이터 제거: 픽셀 데이터만 가진 새 이미지에 다시 담아 저장한다.
+        # TODO(AI 모델 연동): 여기서 딥백신 Beta(적대적 노이즈) 적용을 추가한다.
+        clean_image = Image.new(image.mode, image.size)
+        clean_image.putdata(list(image.getdata()))
+        clean_image.save(protected_path, format=image.format)
+    except OSError:
+        raise HTTPException(status_code=500, detail="이미지 처리 중 오류가 발생했습니다.")
 
     protected_bytes = protected_path.read_bytes()
     sha256 = hashlib.sha256(protected_bytes).hexdigest()
@@ -97,7 +112,10 @@ def save_protection(jobId: str):
     if not job:
         raise HTTPException(status_code=404, detail="처리 결과를 찾을 수 없습니다.")
     saved_path = SAVED_DIR / job["protectedPath"].name
-    saved_path.write_bytes(job["protectedPath"].read_bytes())
+    try:
+        saved_path.write_bytes(job["protectedPath"].read_bytes())
+    except OSError:
+        raise HTTPException(status_code=500, detail="보호사진 저장 중 오류가 발생했습니다.")
     return {"ok": True}
 
 
