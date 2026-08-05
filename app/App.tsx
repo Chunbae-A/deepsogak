@@ -19,6 +19,7 @@ export default function App() {
   const [tab, setTab] = useState<TabKey>('Monitoring');
   const [flowStep, setFlowStep] = useState<MonitoringFlowStep>('monitoring');
   const [protectionStep, setProtectionStep] = useState<ProtectionFlowStep>('upload');
+  const [protectionJobId, setProtectionJobId] = useState<string | null>(null);
 
   const handleSelectTab = (next: TabKey) => {
     if (next === 'Monitoring') setFlowStep('monitoring');
@@ -31,7 +32,12 @@ export default function App() {
       <StatusBar style="dark" />
       <View style={styles.body}>
         {tab === 'Protection' && protectionStep === 'upload' && (
-          <SafeUploadScreen onCreateProtectedPhoto={() => setProtectionStep('result')} />
+          <SafeUploadScreen
+            onCreateProtectedPhoto={(jobId) => {
+              setProtectionJobId(jobId);
+              setProtectionStep('result');
+            }}
+          />
         )}
         {tab === 'Protection' && protectionStep === 'result' && (
           <ProtectionResultScreen
