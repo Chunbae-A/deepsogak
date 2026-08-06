@@ -22,3 +22,8 @@ export async function submitConsent(): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/api/report/consent`, { method: 'POST' });
   if (!res.ok) throw new Error('동의 처리에 실패했습니다.');
 }
+
+// TODO(AI 모델 연동): 동의 후 생성된 신고서 패키지(PDF·ZIP)를 기기에 저장한다.
+export async function saveReportPackage(): Promise<void> {
+  // TODO: 실제 연동 시 expo-file-system(앱) / <a download>(웹)로 교체. 지금은 no-op.
+}
