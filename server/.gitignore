@@ -6,3 +6,4 @@ storage/saved/*
 !storage/saved/.gitkeep
 __pycache__/
 *.pyc
+.env

@@ -5,11 +5,16 @@ import uuid
 from pathlib import Path
 
 import imagehash
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
+
+import vision_scan
+
+load_dotenv()
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 안전 업로드 화면 안내(최대 20MB)와 동일한 값
 ALLOWED_FORMATS = {"JPEG", "PNG"}
@@ -120,32 +125,83 @@ def save_protection(jobId: str):
 
 
 # ---------------------------------------------------------------------------
-# 아래 모니터링/후보검토/신고서 엔드포인트는 아직 실제 얼굴 인식(ArcFace)·
-# 딥페이크 판별(EfficientNet-B4)·이미지 검색(SerpApi) 모델/키가 없어 고정된
-# 시뮬레이션 데이터를 반환한다. 실제 모델이 준비되면 이 함수들 내부만 교체한다.
+# 얼굴가드: GOOGLE_VISION_API_KEY가 있으면 vision_scan으로 실제 역이미지 검색 +
+# pHash 실측 검증을 수행한다 (참고: https://github.com/BcKmini/copycat-watch).
+# 키가 없거나 아직 보호사진을 만들지 않았으면 고정된 시뮬레이션 데이터로 폴백한다.
+# 딥페이크 판별(EfficientNet-B4) 모델은 아직 없어 riskLevel은 pHash 유사도로 근사한다.
 # ---------------------------------------------------------------------------
+
+_scan_cache: dict = {"job_id": None, "matches": None}
+
+
+def _get_active_matches() -> list[dict] | None:
+    if not JOBS:
+        return None
+    latest_job_id = max(JOBS, key=lambda k: JOBS[k]["createdAt"])
+    if _scan_cache["job_id"] == latest_job_id:
+        return _scan_cache["matches"]
+    job = JOBS[latest_job_id]
+    image_bytes = job["protectedPath"].read_bytes()
+    query_hash = imagehash.hex_to_hash(job["phash"])
+    matches = vision_scan.scan_web(image_bytes, query_hash)
+    _scan_cache["job_id"] = latest_job_id
+    _scan_cache["matches"] = matches
+    return matches
+
+
+def _risk_from_similarity(similarity: float) -> tuple[str, str]:
+    if similarity >= 85:
+        return "high", "딥페이크 위험도 · 높음"
+    if similarity >= vision_scan.SIMILARITY_THRESHOLD:
+        return "low", "딥페이크 위험도 · 낮음"
+    return "exclude-recommended", "제외 권장"
 
 
 @app.get("/api/monitoring/summary")
 def get_monitoring_summary():
+    matches = _get_active_matches()
+    if matches is None:
+        return {
+            "lastCheckedAt": "2026.08.02 14:32",
+            "totalCandidates": 6,
+            "sources": [
+                {"label": "검색엔진", "count": "3건"},
+                {"label": "공개 SNS", "count": "2건"},
+                {"label": "기타 웹사이트", "count": "1건"},
+            ],
+        }
+
+    counts: dict[str, int] = {}
+    for m in matches:
+        counts[m["source_type"]] = counts.get(m["source_type"], 0) + 1
     return {
-        "lastCheckedAt": "2026.08.02 14:32",
-        "totalCandidates": 6,
-        "sources": [
-            {"label": "검색엔진", "count": "3건"},
-            {"label": "공개 SNS", "count": "2건"},
-            {"label": "기타 웹사이트", "count": "1건"},
-        ],
+        "lastCheckedAt": "방금 확인",
+        "totalCandidates": len(matches),
+        "sources": [{"label": label, "count": f"{count}건"} for label, count in counts.items()],
     }
 
 
 @app.get("/api/monitoring/candidates")
 def get_candidates():
-    return [
-        {"id": "c1", "label": "후보 1", "similarityPercent": 92, "riskLabel": "딥페이크 위험도 · 높음", "riskLevel": "high"},
-        {"id": "c2", "label": "후보 2", "similarityPercent": 71, "riskLabel": "딥페이크 위험도 · 낮음", "riskLevel": "low"},
-        {"id": "c3", "label": "후보 3", "similarityPercent": 38, "riskLabel": "제외 권장", "riskLevel": "exclude-recommended"},
-    ]
+    matches = _get_active_matches()
+    if matches is None:
+        return [
+            {"id": "c1", "label": "후보 1", "similarityPercent": 92, "riskLabel": "딥페이크 위험도 · 높음", "riskLevel": "high"},
+            {"id": "c2", "label": "후보 2", "similarityPercent": 71, "riskLabel": "딥페이크 위험도 · 낮음", "riskLevel": "low"},
+            {"id": "c3", "label": "후보 3", "similarityPercent": 38, "riskLabel": "제외 권장", "riskLevel": "exclude-recommended"},
+        ]
+
+    result = []
+    for i, m in enumerate(matches, start=1):
+        risk_level, risk_label = _risk_from_similarity(m["similarity"])
+        result.append({
+            "id": f"c{i}",
+            "label": f"후보 {i}",
+            "similarityPercent": round(m["similarity"]),
+            "riskLabel": risk_label,
+            "riskLevel": risk_level,
+        })
+    return result
 
 
 CANDIDATE_DETAILS = {
@@ -176,8 +232,26 @@ CANDIDATE_DETAILS = {
 @app.get("/api/monitoring/candidates/{candidate_id}")
 def get_candidate_detail(candidate_id: str):
     base = next((c for c in get_candidates() if c["id"] == candidate_id), None)
+    if base is None:
+        raise HTTPException(status_code=404, detail="후보를 찾을 수 없습니다.")
+
+    matches = _get_active_matches()
+    if matches is not None:
+        index = int(candidate_id[1:]) - 1
+        m = matches[index]
+        signals = ["pHash 기반 이미지 유사도 실측 대조"]
+        signals.append("게시 페이지 직접 방문 확인" if m["source_url"] else "이미지 URL 직접 대조 (게시 페이지 미확인)")
+        return {
+            **base,
+            "sourceLabel": m["source_type"],
+            "sourceUrl": m["source_url"] or m["image_url"] or "-",
+            "sourceAccount": "-",
+            "foundAt": "방금 확인",
+            "signals": signals,
+        }
+
     detail = CANDIDATE_DETAILS.get(candidate_id)
-    if base is None or detail is None:
+    if detail is None:
         raise HTTPException(status_code=404, detail="후보를 찾을 수 없습니다.")
     return {**base, **detail}
 
