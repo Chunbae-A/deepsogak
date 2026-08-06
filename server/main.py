@@ -148,6 +148,40 @@ def get_candidates():
     ]
 
 
+CANDIDATE_DETAILS = {
+    "c1": {
+        "sourceLabel": "공개 SNS",
+        "sourceUrl": "social.example.com/post/8A31",
+        "sourceAccount": "@public_archive",
+        "foundAt": "오늘 14:28",
+        "signals": ["얼굴 경계와 피부 질감에서 합성 흔적 감지", "원본 보호본과 pHash 유사 패턴 확인"],
+    },
+    "c2": {
+        "sourceLabel": "검색엔진",
+        "sourceUrl": "images.example.net/gallery/552",
+        "sourceAccount": "-",
+        "foundAt": "오늘 09:12",
+        "signals": ["합성 흔적 뚜렷하지 않음", "동일 인물 가능성만 확인됨"],
+    },
+    "c3": {
+        "sourceLabel": "기타 웹사이트",
+        "sourceUrl": "forum.example.org/thread/19",
+        "sourceAccount": "-",
+        "foundAt": "어제 22:47",
+        "signals": ["얼굴 유사도 기준(0.6) 미달", "다른 인물일 가능성이 높음"],
+    },
+}
+
+
+@app.get("/api/monitoring/candidates/{candidate_id}")
+def get_candidate_detail(candidate_id: str):
+    base = next((c for c in get_candidates() if c["id"] == candidate_id), None)
+    detail = CANDIDATE_DETAILS.get(candidate_id)
+    if base is None or detail is None:
+        raise HTTPException(status_code=404, detail="후보를 찾을 수 없습니다.")
+    return {**base, **detail}
+
+
 class ConfirmCandidatesBody(BaseModel):
     keepIds: list[str]
 

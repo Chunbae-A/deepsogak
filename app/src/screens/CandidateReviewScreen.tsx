@@ -6,6 +6,7 @@ import { InfoPanel } from '../components/InfoPanel';
 import { CandidateRow } from '../components/CandidateRow';
 import { PrimaryButton } from '../components/Button';
 import { LoadingView, ErrorView } from '../components/ScreenStatus';
+import { CandidateDetailScreen } from './CandidateDetailScreen';
 import { colors, spacing, typography } from '../theme';
 import { Candidate, RiskLevel, fetchCandidates, confirmCandidateSelection } from '../services/candidateApi';
 
@@ -23,6 +24,7 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>('all');
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -57,6 +59,19 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
     confirmCandidateSelection(keepIds).catch(() => {});
     onConfirmSelection();
   };
+
+  if (selectedCandidateId) {
+    return (
+      <CandidateDetailScreen
+        candidateId={selectedCandidateId}
+        onExclude={() => {
+          toggleExclude(selectedCandidateId);
+          setSelectedCandidateId(null);
+        }}
+        onCreateReport={handleConfirm}
+      />
+    );
+  }
 
   return (
     <View style={styles.screen}>
@@ -107,6 +122,7 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
                     excluded={excludedIds.has(c.id)}
                     onToggleExclude={() => toggleExclude(c.id)}
                     highlighted={c.id === candidates[0]?.id}
+                    onPress={() => setSelectedCandidateId(c.id)}
                   />
                 ))}
             </View>
