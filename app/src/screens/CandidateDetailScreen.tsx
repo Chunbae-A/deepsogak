@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppBar } from '../components/AppBar';
 import { InfoPanel } from '../components/InfoPanel';
 import { PrimaryButton, SecondaryButton } from '../components/Button';
@@ -39,6 +39,13 @@ export function CandidateDetailScreen({
 
   useEffect(() => load(), [load]);
 
+  const hasSourceLink = !!detail && detail.sourceUrl !== '-';
+  const openSource = useCallback(() => {
+    if (!detail || detail.sourceUrl === '-') return;
+    const url = detail.sourceUrl.startsWith('http') ? detail.sourceUrl : `https://${detail.sourceUrl}`;
+    Linking.openURL(url);
+  }, [detail]);
+
   return (
     <View style={styles.screen}>
       <AppBar step="4 / 5" />
@@ -67,10 +74,17 @@ export function CandidateDetailScreen({
 
             <View style={styles.sourceCard}>
               <Text style={styles.sourceTitle}>발견 출처</Text>
-              <Text style={styles.sourceUrl}>{detail.sourceUrl}</Text>
+              <Pressable onPress={openSource} disabled={!hasSourceLink}>
+                <Text style={[styles.sourceUrl, hasSourceLink && styles.sourceUrlLink]}>{detail.sourceUrl}</Text>
+              </Pressable>
               <Text style={styles.sourceMeta}>
                 게시 계정 {detail.sourceAccount} · {detail.foundAt}
               </Text>
+              {hasSourceLink && (
+                <Pressable onPress={openSource} style={styles.sourceLinkButton}>
+                  <Text style={styles.sourceLinkButtonText}>발견된 페이지 열어보기 →</Text>
+                </Pressable>
+              )}
             </View>
 
             <View style={styles.metricsRow}>
@@ -143,7 +157,10 @@ const styles = StyleSheet.create({
   },
   sourceTitle: { ...typography.label, color: colors.text900, fontWeight: '700' },
   sourceUrl: { ...typography.label, color: colors.text700 },
+  sourceUrlLink: { color: colors.blue600, textDecorationLine: 'underline' },
   sourceMeta: { ...typography.caption, color: colors.text500 },
+  sourceLinkButton: { marginTop: 2 },
+  sourceLinkButtonText: { ...typography.label, color: colors.blue600, fontWeight: '700' },
   metricsRow: { flexDirection: 'row', gap: spacing.sm, width: '100%' },
   metricCard: { flex: 1, borderRadius: radii.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 3 },
   metricCardBlue: { backgroundColor: colors.blue100 },
