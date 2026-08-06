@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppBar } from '../components/AppBar';
 import { StatusChip } from '../components/StatusChip';
 import { InfoPanel } from '../components/InfoPanel';
@@ -7,12 +7,22 @@ import { CandidateRow } from '../components/CandidateRow';
 import { PrimaryButton } from '../components/Button';
 import { LoadingView, ErrorView } from '../components/ScreenStatus';
 import { colors, spacing, typography } from '../theme';
-import { Candidate, fetchCandidates, confirmCandidateSelection } from '../services/candidateApi';
+import { Candidate, RiskLevel, fetchCandidates, confirmCandidateSelection } from '../services/candidateApi';
+
+type FilterKey = 'all' | RiskLevel;
+
+const FILTER_LABELS: Record<RiskLevel, string> = {
+  high: '높음',
+  medium: '보통',
+  low: '낮음',
+  'exclude-recommended': '제외',
+};
 
 export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelection: () => void }) {
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<FilterKey>('all');
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -65,18 +75,40 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
 
             <StatusChip label={`검토 후보 ${candidates.length}건`} />
 
+            <View style={styles.filterChips}>
+              <FilterChip
+                label={`전체 ${candidates.length}`}
+                active={filter === 'all'}
+                tone="neutral"
+                onPress={() => setFilter('all')}
+              />
+              {(Object.keys(FILTER_LABELS) as RiskLevel[])
+                .filter((level) => candidates.some((c) => c.riskLevel === level))
+                .map((level) => (
+                  <FilterChip
+                    key={level}
+                    label={`${FILTER_LABELS[level]} ${candidates.filter((c) => c.riskLevel === level).length}`}
+                    active={filter === level}
+                    tone={level === 'high' ? 'amber' : level === 'low' ? 'blue' : 'neutral'}
+                    onPress={() => setFilter(level)}
+                  />
+                ))}
+            </View>
+
             <View style={styles.list}>
-              {candidates.map((c, index) => (
-                <CandidateRow
-                  key={c.id}
-                  candidate={c.label}
-                  similarity={`얼굴 유사도 ${c.similarityPercent}%`}
-                  risk={c.riskLabel}
-                  excluded={excludedIds.has(c.id)}
-                  onToggleExclude={() => toggleExclude(c.id)}
-                  highlighted={index === 0}
-                />
-              ))}
+              {candidates
+                .filter((c) => filter === 'all' || c.riskLevel === filter)
+                .map((c) => (
+                  <CandidateRow
+                    key={c.id}
+                    candidate={c.label}
+                    similarity={`얼굴 유사도 ${c.similarityPercent}%`}
+                    risk={c.riskLabel}
+                    excluded={excludedIds.has(c.id)}
+                    onToggleExclude={() => toggleExclude(c.id)}
+                    highlighted={c.id === candidates[0]?.id}
+                  />
+                ))}
             </View>
 
             <InfoPanel
@@ -94,6 +126,28 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
   );
 }
 
+type FilterChipTone = 'neutral' | 'amber' | 'blue';
+
+function FilterChip({
+  label,
+  active,
+  tone,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  tone: FilterChipTone;
+  onPress: () => void;
+}) {
+  const toneStyle = tone === 'amber' ? styles.chipAmber : tone === 'blue' ? styles.chipBlue : styles.chipNeutral;
+  const toneTextStyle = tone === 'amber' ? styles.chipAmberText : tone === 'blue' ? styles.chipBlueText : styles.chipNeutralText;
+  return (
+    <Pressable style={[styles.chip, active ? styles.chipActive : toneStyle]} onPress={onPress}>
+      <Text style={active ? styles.chipActiveText : toneTextStyle}>{label}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.surface, alignItems: 'center', paddingHorizontal: spacing.xl, paddingTop: spacing.lg, gap: spacing.md },
   content: { flex: 1, width: '100%' },
@@ -101,6 +155,16 @@ const styles = StyleSheet.create({
   headerCopy: { gap: spacing.xs },
   title: { ...typography.title, color: colors.text900 },
   subtitle: { ...typography.caption, color: colors.text700 },
+  filterChips: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
+  chip: { height: 28, borderRadius: 999, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
+  chipActive: { backgroundColor: colors.navy900 },
+  chipActiveText: { ...typography.label, color: colors.white },
+  chipNeutral: { backgroundColor: colors.surface },
+  chipNeutralText: { ...typography.label, color: colors.text700 },
+  chipAmber: { backgroundColor: colors.amber100 },
+  chipAmberText: { ...typography.label, color: colors.amber600 },
+  chipBlue: { backgroundColor: colors.blue100 },
+  chipBlueText: { ...typography.label, color: colors.blue600 },
   list: { gap: spacing.sm, width: '100%' },
   bottomCta: { width: '100%', paddingBottom: spacing.lg },
 });
