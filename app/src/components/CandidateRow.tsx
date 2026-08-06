@@ -11,11 +11,13 @@ type CandidateRowProps = {
   onToggleExclude: () => void;
   /** Figma: 검토 목록에서 가장 위험도가 높은 후보를 파란 테두리로 강조 표시 */
   highlighted?: boolean;
+  /** 후보 상세 분석 화면으로 이동 (제외 버튼 영역은 별도로 처리되어 여기 포함되지 않음) */
+  onPress?: () => void;
 };
 
-export function CandidateRow({ candidate, similarity, risk, excluded, onToggleExclude, highlighted }: CandidateRowProps) {
+export function CandidateRow({ candidate, similarity, risk, excluded, onToggleExclude, highlighted, onPress }: CandidateRowProps) {
   return (
-    <View style={[styles.row, highlighted && styles.rowHighlighted]}>
+    <Pressable style={[styles.row, highlighted && styles.rowHighlighted]} onPress={onPress}>
       <Image source={thumbnail} style={styles.thumbnail} resizeMode="cover" />
       <View style={styles.info}>
         <Text style={styles.candidate}>{candidate}</Text>
@@ -26,7 +28,7 @@ export function CandidateRow({ candidate, similarity, risk, excluded, onToggleEx
         <View style={[styles.checkbox, excluded && styles.checkboxChecked]} />
         <Text style={styles.excludeLabel}>제외</Text>
       </Pressable>
-    </View>
+    </Pressable>
   );
 }
 

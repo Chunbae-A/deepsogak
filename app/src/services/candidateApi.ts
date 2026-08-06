@@ -15,9 +15,23 @@ export type Candidate = {
   riskLevel: RiskLevel;
 };
 
+export type CandidateDetail = Candidate & {
+  sourceLabel: string; // "공개 SNS"
+  sourceUrl: string;
+  sourceAccount: string;
+  foundAt: string;
+  signals: string[];
+};
+
 export async function fetchCandidates(): Promise<Candidate[]> {
   const res = await fetch(`${API_BASE_URL}/api/monitoring/candidates`);
   if (!res.ok) throw new Error('후보 목록을 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function fetchCandidateDetail(id: string): Promise<CandidateDetail> {
+  const res = await fetch(`${API_BASE_URL}/api/monitoring/candidates/${id}`);
+  if (!res.ok) throw new Error('후보 상세 정보를 불러오지 못했습니다.');
   return res.json();
 }
 
