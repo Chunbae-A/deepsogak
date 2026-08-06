@@ -8,6 +8,7 @@ import { IncidentReportScreen } from './src/screens/IncidentReportScreen';
 import { ReportReadyScreen } from './src/screens/ReportReadyScreen';
 import { SafeUploadScreen } from './src/screens/SafeUploadScreen';
 import { ProtectionResultScreen } from './src/screens/ProtectionResultScreen';
+import { HomeScreen } from './src/screens/HomeScreen';
 import { colors, spacing } from './src/theme';
 
 // 얼굴가드(모니터링→후보검토)·딥백신(안전업로드→보호결과)·즉각소각(초안→완료)은
@@ -18,13 +19,15 @@ type ProtectionFlowStep = 'upload' | 'result';
 type ReportFlowStep = 'draft' | 'ready';
 
 export default function App() {
-  const [tab, setTab] = useState<TabKey>('Monitoring');
+  const [hasEnteredApp, setHasEnteredApp] = useState(false);
+  const [tab, setTab] = useState<TabKey>('Protection');
   const [flowStep, setFlowStep] = useState<MonitoringFlowStep>('monitoring');
   const [protectionStep, setProtectionStep] = useState<ProtectionFlowStep>('upload');
   const [protectionJobId, setProtectionJobId] = useState<string | null>(null);
   const [reportStep, setReportStep] = useState<ReportFlowStep>('draft');
 
   const handleSelectTab = (next: TabKey) => {
+    setHasEnteredApp(true);
     if (next === 'Monitoring') setFlowStep('monitoring');
     if (next === 'Protection') setProtectionStep('upload');
     if (next === 'Report') setReportStep('draft');
@@ -36,7 +39,13 @@ export default function App() {
       <SafeAreaView style={styles.safe}>
         <StatusBar style="dark" />
         <View style={styles.body}>
-          {tab === 'Protection' && protectionStep === 'upload' && (
+          {!hasEnteredApp && (
+            <HomeScreen
+              onStartProtection={() => handleSelectTab('Protection')}
+              onOpenMonitoring={() => handleSelectTab('Monitoring')}
+            />
+          )}
+          {hasEnteredApp && tab === 'Protection' && protectionStep === 'upload' && (
             <SafeUploadScreen
               onCreateProtectedPhoto={(jobId) => {
                 setProtectionJobId(jobId);
