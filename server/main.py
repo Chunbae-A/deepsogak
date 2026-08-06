@@ -38,6 +38,7 @@ app.mount("/static", StaticFiles(directory=STORAGE_DIR), name="static")
 
 # 프로토타입용 인메모리 저장소. 실서비스에서는 DB로 교체한다.
 JOBS: dict[str, dict] = {}
+REPORT_COUNT = 0
 
 
 @app.post("/api/protection/process")
@@ -281,4 +282,23 @@ def get_report_draft():
 
 @app.post("/api/report/consent")
 def submit_report_consent():
+    global REPORT_COUNT
+    REPORT_COUNT += 1
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# 홈 화면 요약. 서비스 전체 계정·통계 시스템은 아직 없어(프로토타입 인메모리 저장소
+# 기준) 이번 세션에서 처리한 보호사진·노출후보·신고자료 건수를 그대로 보여준다.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/home/summary")
+def get_home_summary():
+    monitoring = get_monitoring_summary()
+    return {
+        "protectedCount": len(JOBS),
+        "candidateCount": monitoring["totalCandidates"],
+        "reportCount": REPORT_COUNT,
+        "lastCheckedAt": monitoring["lastCheckedAt"],
+    }
