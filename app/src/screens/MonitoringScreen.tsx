@@ -10,6 +10,13 @@ import { fetchMonitoringSummary, MonitoringSummary } from '../services/monitorin
 
 const addIcon = require('../../assets/icons/icon-add.png');
 
+// Figma의 축약 칩 라벨(검색·SNS·웹)과 서버 응답 라벨을 매핑한다.
+const SHORT_SOURCE_LABELS: Record<string, string> = {
+  검색엔진: '검색',
+  '공개 SNS': 'SNS',
+  '기타 웹사이트': '웹',
+};
+
 export function MonitoringScreen({ onConfirmCandidates }: { onConfirmCandidates: () => void }) {
   const [summary, setSummary] = useState<MonitoringSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +55,19 @@ export function MonitoringScreen({ onConfirmCandidates }: { onConfirmCandidates:
             </View>
 
             <StatusChip label={`최근 확인 · ${summary.lastCheckedAt}`} />
+
+            <View style={styles.guideChips}>
+              <View style={[styles.chip, styles.chipActive]}>
+                <Text style={styles.chipActiveText}>전체 {summary.totalCandidates}</Text>
+              </View>
+              {summary.sources.map((source) => (
+                <View key={source.label} style={styles.chip}>
+                  <Text style={styles.chipText}>
+                    {SHORT_SOURCE_LABELS[source.label] ?? source.label} {source.count.replace('건', '')}
+                  </Text>
+                </View>
+              ))}
+            </View>
 
             <View style={styles.resultCard}>
               <Text style={styles.resultLabel}>공개 탐색 결과</Text>
@@ -94,6 +114,11 @@ const styles = StyleSheet.create({
   headerCopy: { gap: spacing.xs },
   title: { ...typography.title, color: colors.text900 },
   subtitle: { ...typography.caption, color: colors.text700 },
+  guideChips: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
+  chip: { height: 28, borderRadius: radii.full, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.blue100 },
+  chipText: { ...typography.label, color: colors.blue600 },
+  chipActive: { backgroundColor: colors.navy900 },
+  chipActiveText: { ...typography.label, color: colors.white },
   resultCard: { backgroundColor: colors.navy900, borderRadius: radii.lg, paddingHorizontal: spacing.lg, paddingVertical: 14, gap: spacing.xs },
   resultLabel: { ...typography.caption, color: colors.blue100 },
   resultCount: { ...typography.display, color: colors.white, marginBottom: spacing.xs },
