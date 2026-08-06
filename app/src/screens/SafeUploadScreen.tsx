@@ -4,6 +4,7 @@ import { AppBar } from '../components/AppBar';
 import { InfoPanel } from '../components/InfoPanel';
 import { CheckRow } from '../components/CheckRow';
 import { PrimaryButton } from '../components/Button';
+import { ProtectingScreen } from './ProtectingScreen';
 import { colors, radii, spacing, typography } from '../theme';
 import { SelectedPhoto, pickPhoto, startProtection } from '../services/safeUploadApi';
 
@@ -45,6 +46,10 @@ export function SafeUploadScreen({ onCreateProtectedPhoto }: { onCreateProtected
     }
   };
 
+  if (isUploading && photo) {
+    return <ProtectingScreen photo={photo} />;
+  }
+
   return (
     <View style={styles.screen}>
       <AppBar step="1 / 5" />
@@ -83,11 +88,7 @@ export function SafeUploadScreen({ onCreateProtectedPhoto }: { onCreateProtected
 
       <View style={styles.bottomCta}>
         <Text style={styles.bottomHint}>{uploadError ?? '사진은 이 기기에서 안전하게 처리됩니다'}</Text>
-        <PrimaryButton
-          label={isUploading ? '처리 중...' : '보호사진 만들기'}
-          onPress={handleCreate}
-          disabled={!photo || isUploading}
-        />
+        <PrimaryButton label="보호사진 만들기" onPress={handleCreate} disabled={!photo} />
       </View>
     </View>
   );
