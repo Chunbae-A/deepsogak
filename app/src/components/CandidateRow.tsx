@@ -7,6 +7,10 @@ type CandidateRowProps = {
   candidate: string;
   similarity: string;
   risk: string;
+  /** 실제 검색으로 발견된 출처 (예: "공개 SNS", "검색엔진") */
+  sourceLabel?: string;
+  /** 실제 검색으로 찾은 이미지 URL. 없으면 흐림 처리된 기본 썸네일을 보여준다. */
+  thumbnailUrl?: string | null;
   excluded: boolean;
   onToggleExclude: () => void;
   /** Figma: 검토 목록에서 가장 위험도가 높은 후보를 파란 테두리로 강조 표시 */
@@ -15,12 +19,23 @@ type CandidateRowProps = {
   onPress?: () => void;
 };
 
-export function CandidateRow({ candidate, similarity, risk, excluded, onToggleExclude, highlighted, onPress }: CandidateRowProps) {
+export function CandidateRow({
+  candidate,
+  similarity,
+  risk,
+  sourceLabel,
+  thumbnailUrl,
+  excluded,
+  onToggleExclude,
+  highlighted,
+  onPress,
+}: CandidateRowProps) {
   return (
     <Pressable style={[styles.row, highlighted && styles.rowHighlighted]} onPress={onPress}>
-      <Image source={thumbnail} style={styles.thumbnail} resizeMode="cover" />
+      <Image source={thumbnailUrl ? { uri: thumbnailUrl } : thumbnail} style={styles.thumbnail} resizeMode="cover" />
       <View style={styles.info}>
         <Text style={styles.candidate}>{candidate}</Text>
+        {sourceLabel ? <Text style={styles.source}>{sourceLabel}에서 발견</Text> : null}
         <Text style={styles.similarity}>{similarity}</Text>
         <Text style={styles.risk}>{risk}</Text>
       </View>
@@ -48,6 +63,7 @@ const styles = StyleSheet.create({
   thumbnail: { width: 72, height: 72, borderRadius: radii.md },
   info: { flex: 1, gap: 2 },
   candidate: { ...typography.bodyStrong, color: colors.text900 },
+  source: { ...typography.caption, color: colors.text500 },
   similarity: { ...typography.caption, color: colors.text700 },
   risk: { ...typography.caption, color: colors.blue600 },
   excludeControl: {

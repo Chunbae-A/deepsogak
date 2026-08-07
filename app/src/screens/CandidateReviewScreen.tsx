@@ -119,6 +119,8 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
                     candidate={c.label}
                     similarity={`얼굴 유사도 ${c.similarityPercent}%`}
                     risk={c.riskLabel}
+                    sourceLabel={c.sourceLabel}
+                    thumbnailUrl={c.thumbnailUrl}
                     excluded={excludedIds.has(c.id)}
                     onToggleExclude={() => toggleExclude(c.id)}
                     highlighted={c.id === candidates[0]?.id}

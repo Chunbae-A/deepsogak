@@ -187,9 +187,9 @@ def get_candidates():
     matches = _get_active_matches()
     if matches is None:
         return [
-            {"id": "c1", "label": "후보 1", "similarityPercent": 92, "riskLabel": "딥페이크 위험도 · 높음", "riskLevel": "high"},
-            {"id": "c2", "label": "후보 2", "similarityPercent": 71, "riskLabel": "딥페이크 위험도 · 낮음", "riskLevel": "low"},
-            {"id": "c3", "label": "후보 3", "similarityPercent": 38, "riskLabel": "제외 권장", "riskLevel": "exclude-recommended"},
+            {"id": "c1", "label": "후보 1", "similarityPercent": 92, "riskLabel": "딥페이크 위험도 · 높음", "riskLevel": "high", "sourceLabel": "공개 SNS", "thumbnailUrl": None},
+            {"id": "c2", "label": "후보 2", "similarityPercent": 71, "riskLabel": "딥페이크 위험도 · 낮음", "riskLevel": "low", "sourceLabel": "검색엔진", "thumbnailUrl": None},
+            {"id": "c3", "label": "후보 3", "similarityPercent": 38, "riskLabel": "제외 권장", "riskLevel": "exclude-recommended", "sourceLabel": "기타 웹사이트", "thumbnailUrl": None},
         ]
 
     result = []
@@ -201,6 +201,8 @@ def get_candidates():
             "similarityPercent": round(m["similarity"]),
             "riskLabel": risk_label,
             "riskLevel": risk_level,
+            "sourceLabel": m["source_type"],
+            "thumbnailUrl": m["image_url"],
         })
     return result
 
