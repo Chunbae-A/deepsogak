@@ -22,6 +22,7 @@ export function ProtectionResultScreen({
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -42,12 +43,15 @@ export function ProtectionResultScreen({
   useEffect(() => load(), [load]);
 
   const handleSave = async () => {
+    if (!result) return;
     setIsSaving(true);
     setSaveError(null);
+    setSaved(false);
     try {
-      await saveProtectedPhoto(jobId);
-    } catch {
-      setSaveError('보호사진 저장에 실패했습니다.');
+      await saveProtectedPhoto(jobId, result.protectedPhotoUrl);
+      setSaved(true);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : '보호사진 저장에 실패했습니다.');
     } finally {
       setIsSaving(false);
     }
@@ -101,6 +105,7 @@ export function ProtectionResultScreen({
 
           <View style={styles.bottomCta}>
             {saveError && <Text style={styles.saveError}>{saveError}</Text>}
+            {saved && !saveError && <Text style={styles.saveSuccess}>기기에 보호사진을 저장했습니다.</Text>}
             <PrimaryButton label={isSaving ? '저장 중...' : '보호사진 저장'} onPress={handleSave} disabled={isSaving} />
             <SecondaryButton label="공개 노출 모니터링 시작" onPress={onStartMonitoring} />
           </View>
@@ -156,4 +161,5 @@ const styles = StyleSheet.create({
   resultsTitle: { ...typography.bodyStrong, color: colors.text900 },
   bottomCta: { width: '100%', paddingBottom: spacing.lg, gap: spacing.sm },
   saveError: { ...typography.caption, color: colors.amber600, textAlign: 'center' },
+  saveSuccess: { ...typography.caption, color: colors.green600, textAlign: 'center' },
 });
