@@ -40,6 +40,7 @@ export function CandidateDetailScreen({
   useEffect(() => load(), [load]);
 
   const hasSourceLink = !!detail && detail.sourceUrl !== '-';
+  const isManualReport = detail?.sourceLabel === '직접 제보';
   const openSource = useCallback(() => {
     if (!detail || detail.sourceUrl === '-') return;
     const url = detail.sourceUrl.startsWith('http') ? detail.sourceUrl : `https://${detail.sourceUrl}`;
@@ -67,7 +68,9 @@ export function CandidateDetailScreen({
                 <Text style={styles.summaryTitle}>
                   {detail.label} · {detail.sourceLabel}
                 </Text>
-                <Text style={styles.summaryText}>얼굴 유사도 {detail.similarityPercent}%</Text>
+                <Text style={styles.summaryText}>
+                  {isManualReport ? '제보 자료 · 검토 대기' : `얼굴 유사도 ${detail.similarityPercent}%`}
+                </Text>
                 <Text style={styles.summaryRisk}>{detail.riskLabel}</Text>
               </View>
             </View>
@@ -90,7 +93,7 @@ export function CandidateDetailScreen({
             <View style={styles.metricsRow}>
               <View style={[styles.metricCard, styles.metricCardBlue]}>
                 <Text style={styles.metricLabel}>얼굴 유사도</Text>
-                <Text style={styles.metricValue}>{detail.similarityPercent}%</Text>
+                <Text style={styles.metricValue}>{isManualReport ? '-' : `${detail.similarityPercent}%`}</Text>
               </View>
               <View style={[styles.metricCard, styles.metricCardAmber]}>
                 <Text style={styles.metricLabel}>딥페이크 위험도</Text>

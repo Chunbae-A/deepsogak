@@ -161,27 +161,50 @@ def _risk_from_similarity(similarity: float) -> tuple[str, str]:
     return "exclude-recommended", "제외 권장"
 
 
+# 사용자가 "URL·캡처·파일 직접 제보"로 추가한 항목. 자동 순찰 대상이 아닌 비공개
+# 채널을 지인 제보로 보완하는 기획서 2.2절 "제보 경로"를 실제로 반영한다.
+_manual_reports: list[dict] = []  # [{"url": str}]
+
+
+class ManualReportBody(BaseModel):
+    url: str
+
+
+@app.post("/api/monitoring/report")
+def submit_manual_report(body: ManualReportBody):
+    url = body.url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL을 입력해 주세요.")
+    _manual_reports.append({"url": url})
+    return {"ok": True}
+
+
 @app.get("/api/monitoring/summary")
 def get_monitoring_summary():
     matches = _get_active_matches()
     if matches is None:
-        return {
-            "lastCheckedAt": "2026.08.02 14:32",
-            "totalCandidates": 6,
-            "sources": [
-                {"label": "검색엔진", "count": "3건"},
-                {"label": "공개 SNS", "count": "2건"},
-                {"label": "기타 웹사이트", "count": "1건"},
-            ],
-        }
+        base_total = 6
+        last_checked = "2026.08.02 14:32"
+        sources = [
+            {"label": "검색엔진", "count": "3건"},
+            {"label": "공개 SNS", "count": "2건"},
+            {"label": "기타 웹사이트", "count": "1건"},
+        ]
+    else:
+        counts: dict[str, int] = {}
+        for m in matches:
+            counts[m["source_type"]] = counts.get(m["source_type"], 0) + 1
+        base_total = len(matches)
+        last_checked = "방금 확인"
+        sources = [{"label": label, "count": f"{count}건"} for label, count in counts.items()]
 
-    counts: dict[str, int] = {}
-    for m in matches:
-        counts[m["source_type"]] = counts.get(m["source_type"], 0) + 1
+    if _manual_reports:
+        sources.append({"label": "직접 제보", "count": f"{len(_manual_reports)}건"})
+
     return {
-        "lastCheckedAt": "방금 확인",
-        "totalCandidates": len(matches),
-        "sources": [{"label": label, "count": f"{count}건"} for label, count in counts.items()],
+        "lastCheckedAt": last_checked,
+        "totalCandidates": base_total + len(_manual_reports),
+        "sources": sources,
     }
 
 
@@ -189,23 +212,34 @@ def get_monitoring_summary():
 def get_candidates():
     matches = _get_active_matches()
     if matches is None:
-        return [
+        result = [
             {"id": "c1", "label": "후보 1", "similarityPercent": 92, "riskLabel": "딥페이크 위험도 · 높음", "riskLevel": "high", "sourceLabel": "공개 SNS", "thumbnailUrl": None},
             {"id": "c2", "label": "후보 2", "similarityPercent": 71, "riskLabel": "딥페이크 위험도 · 낮음", "riskLevel": "low", "sourceLabel": "검색엔진", "thumbnailUrl": None},
             {"id": "c3", "label": "후보 3", "similarityPercent": 38, "riskLabel": "제외 권장", "riskLevel": "exclude-recommended", "sourceLabel": "기타 웹사이트", "thumbnailUrl": None},
         ]
+    else:
+        result = []
+        for i, m in enumerate(matches, start=1):
+            risk_level, risk_label = _risk_from_similarity(m["similarity"])
+            result.append({
+                "id": f"c{i}",
+                "label": f"후보 {i}",
+                "similarityPercent": round(m["similarity"]),
+                "riskLabel": risk_label,
+                "riskLevel": risk_level,
+                "sourceLabel": m["source_type"],
+                "thumbnailUrl": m["image_url"],
+            })
 
-    result = []
-    for i, m in enumerate(matches, start=1):
-        risk_level, risk_label = _risk_from_similarity(m["similarity"])
+    for j, _rep in enumerate(_manual_reports, start=len(result) + 1):
         result.append({
-            "id": f"c{i}",
-            "label": f"후보 {i}",
-            "similarityPercent": round(m["similarity"]),
-            "riskLabel": risk_label,
-            "riskLevel": risk_level,
-            "sourceLabel": m["source_type"],
-            "thumbnailUrl": m["image_url"],
+            "id": f"c{j}",
+            "label": f"후보 {j}",
+            "similarityPercent": 0,
+            "riskLabel": "직접 제보 · 검토 대기",
+            "riskLevel": "medium",
+            "sourceLabel": "직접 제보",
+            "thumbnailUrl": None,
         })
     return result
 
@@ -242,8 +276,21 @@ def get_candidate_detail(candidate_id: str):
         raise HTTPException(status_code=404, detail="후보를 찾을 수 없습니다.")
 
     matches = _get_active_matches()
+    base_count = len(matches) if matches is not None else 3
+    index = int(candidate_id[1:]) - 1
+
+    if index >= base_count:
+        rep = _manual_reports[index - base_count]
+        return {
+            **base,
+            "sourceLabel": "직접 제보",
+            "sourceUrl": rep["url"],
+            "sourceAccount": "-",
+            "foundAt": "방금 제보",
+            "signals": ["사용자가 직접 제출한 URL로, 자동 판별 대상이 아님", "필요 시 그대로 신고자료에 포함할 수 있음"],
+        }
+
     if matches is not None:
-        index = int(candidate_id[1:]) - 1
         m = matches[index]
         signals = ["pHash 기반 이미지 유사도 실측 대조"]
         signals.append("게시 페이지 직접 방문 확인" if m["source_url"] else "이미지 URL 직접 대조 (게시 페이지 미확인)")
@@ -273,18 +320,39 @@ _confirmed_keep_ids: list[str] = []
 
 @app.post("/api/monitoring/candidates/confirm")
 def confirm_candidates(body: ConfirmCandidatesBody):
-    global _confirmed_keep_ids
+    global _confirmed_keep_ids, _draft_overrides
     _confirmed_keep_ids = body.keepIds
+    _draft_overrides = None
     return {"ok": True, "keepIds": body.keepIds}
 
 
+# "직접 수정"으로 사용자가 덮어쓴 증거 초안. 값이 있으면 계산된 초안보다 우선한다.
+_draft_overrides: list[dict] | None = None
+
+
 def _build_report_draft() -> list[dict]:
+    if _draft_overrides is not None:
+        return _draft_overrides
+
     matches = _get_active_matches()
-    primary_index = next(
-        (int(cid[1:]) - 1 for cid in _confirmed_keep_ids if matches and 0 <= int(cid[1:]) - 1 < len(matches)),
-        None,
-    )
-    if matches is None or primary_index is None:
+    base_count = len(matches) if matches is not None else 3
+    primary_id = _confirmed_keep_ids[0] if _confirmed_keep_ids else None
+    primary_index = int(primary_id[1:]) - 1 if primary_id else None
+
+    if primary_index is not None and primary_index >= base_count:
+        rep = _manual_reports[primary_index - base_count]
+        return [
+            {"key": "postUrl", "label": "게시물 URL", "value": rep["url"]},
+            {"key": "account", "label": "게시 계정", "value": "-"},
+            {"key": "foundAt", "label": "발견 시각", "value": "방금 제보"},
+            {"key": "capture", "label": "캡처 또는 파일", "value": "사용자 제보 자료"},
+            {"key": "sha256", "label": "SHA-256", "value": "-"},
+            {"key": "phash", "label": "pHash", "value": "-"},
+            {"key": "c2pa", "label": "C2PA 확인 상태", "value": "확인 불가(제보 자료)"},
+            {"key": "aiResult", "label": "AI 분석 결과", "value": "미판별(직접 제보)"},
+        ]
+
+    if matches is None or primary_index is None or not (0 <= primary_index < base_count):
         return [
             {"key": "postUrl", "label": "게시물 URL", "value": "example.com/p/1248"},
             {"key": "account", "label": "게시 계정", "value": "@public_sample"},
@@ -313,6 +381,23 @@ def _build_report_draft() -> list[dict]:
 @app.get("/api/report/draft")
 def get_report_draft():
     return _build_report_draft()
+
+
+class EvidenceFieldBody(BaseModel):
+    key: str
+    label: str
+    value: str
+
+
+class UpdateReportDraftBody(BaseModel):
+    fields: list[EvidenceFieldBody]
+
+
+@app.post("/api/report/draft")
+def update_report_draft(body: UpdateReportDraftBody):
+    global _draft_overrides
+    _draft_overrides = [f.model_dump() for f in body.fields]
+    return {"ok": True}
 
 
 @app.post("/api/report/consent")

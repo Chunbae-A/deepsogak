@@ -1,18 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AppBar } from '../components/AppBar';
 import { StatusChip } from '../components/StatusChip';
 import { EvidenceRow } from '../components/EvidenceRow';
-import { PrimaryButton } from '../components/Button';
+import { PrimaryButton, SecondaryButton } from '../components/Button';
 import { LoadingView, ErrorView } from '../components/ScreenStatus';
 import { colors, radii, spacing, typography } from '../theme';
-import { EvidenceField, fetchEvidenceDraft, submitConsent } from '../services/reportApi';
+import { EvidenceField, fetchEvidenceDraft, submitConsent, updateEvidenceDraft } from '../services/reportApi';
 
 const editIcon = require('../../assets/icons/icon-edit.png');
 
 export function IncidentReportScreen({ onConfirmConsent }: { onConfirmConsent: () => void }) {
   const [draft, setDraft] = useState<EvidenceField[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedFields, setEditedFields] = useState<EvidenceField[] | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -31,6 +35,39 @@ export function IncidentReportScreen({ onConfirmConsent }: { onConfirmConsent: (
   }, []);
 
   useEffect(() => load(), [load]);
+
+  const handleStartEdit = () => {
+    if (!draft) return;
+    setEditedFields(draft.map((f) => ({ ...f })));
+    setEditError(null);
+    setIsEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditedFields(null);
+    setEditError(null);
+  };
+
+  const handleFieldChange = (key: string, value: string) => {
+    setEditedFields((prev) => (prev ? prev.map((f) => (f.key === key ? { ...f, value } : f)) : prev));
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editedFields) return;
+    setIsSavingEdit(true);
+    setEditError(null);
+    try {
+      await updateEvidenceDraft(editedFields);
+      setDraft(editedFields);
+      setIsEditing(false);
+      setEditedFields(null);
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : '증거 초안 수정에 실패했습니다.');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
 
   const handleConfirm = () => {
     submitConsent().catch(() => {});
@@ -57,17 +94,43 @@ export function IncidentReportScreen({ onConfirmConsent }: { onConfirmConsent: (
             <View style={styles.draftCard}>
               <View style={styles.draftHeader}>
                 <Text style={styles.draftHeaderTitle}>증거 초안</Text>
-                <Pressable style={styles.editPill}>
-                  <Image source={editIcon} style={styles.editIcon} resizeMode="contain" />
-                  <Text style={styles.editLabel}>직접 수정</Text>
-                </Pressable>
+                {!isEditing && (
+                  <Pressable style={styles.editPill} onPress={handleStartEdit}>
+                    <Image source={editIcon} style={styles.editIcon} resizeMode="contain" />
+                    <Text style={styles.editLabel}>직접 수정</Text>
+                  </Pressable>
+                )}
               </View>
               <View style={styles.divider} />
-              <View style={styles.rows}>
-                {draft.map((field) => (
-                  <EvidenceRow key={field.key} field={field.label} value={field.value} tone="link" />
-                ))}
-              </View>
+              {isEditing && editedFields ? (
+                <View style={styles.rows}>
+                  {editedFields.map((field) => (
+                    <View key={field.key} style={styles.editRow}>
+                      <Text style={styles.editRowLabel}>{field.label}</Text>
+                      <TextInput
+                        style={styles.editRowInput}
+                        value={field.value}
+                        onChangeText={(text) => handleFieldChange(field.key, text)}
+                      />
+                    </View>
+                  ))}
+                  {editError && <Text style={styles.editError}>{editError}</Text>}
+                  <View style={styles.editActions}>
+                    <View style={styles.editActionButton}>
+                      <SecondaryButton label="취소" onPress={handleCancelEdit} disabled={isSavingEdit} />
+                    </View>
+                    <View style={styles.editActionButton}>
+                      <PrimaryButton label={isSavingEdit ? '저장 중...' : '수정 저장'} onPress={handleSaveEdit} disabled={isSavingEdit} />
+                    </View>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.rows}>
+                  {draft.map((field) => (
+                    <EvidenceRow key={field.key} field={field.label} value={field.value} tone="link" />
+                  ))}
+                </View>
+              )}
             </View>
 
             <View style={styles.consentBox}>
@@ -119,6 +182,19 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   editIcon: { width: 14, height: 14 },
+  editRow: { gap: 4, paddingVertical: 6 },
+  editRowLabel: { ...typography.caption, color: colors.text500 },
+  editRowInput: {
+    height: 40,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.sm,
+    color: colors.text900,
+  },
+  editError: { ...typography.caption, color: colors.amber600 },
+  editActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
+  editActionButton: { flex: 1 },
   editLabel: { ...typography.caption, color: colors.text700 },
   divider: { height: 1, backgroundColor: colors.border, width: '100%' },
   rows: { gap: 0 },

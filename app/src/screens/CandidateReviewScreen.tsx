@@ -117,7 +117,7 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
                   <CandidateRow
                     key={c.id}
                     candidate={c.label}
-                    similarity={`얼굴 유사도 ${c.similarityPercent}%`}
+                    similarity={c.sourceLabel === '직접 제보' ? '제보 자료 · 검토 대기' : `얼굴 유사도 ${c.similarityPercent}%`}
                     risk={c.riskLabel}
                     sourceLabel={c.sourceLabel}
                     thumbnailUrl={c.thumbnailUrl}
