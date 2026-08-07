@@ -20,6 +20,15 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "보호사진을 확인하기 위해 사진 라이브러리 접근 권한이 필요합니다.",
+          "savePhotosPermission": "보호사진을 저장하기 위해 사진 라이브러리 접근 권한이 필요합니다."
+        }
+      ]
+    ]
   }
 }
