@@ -13,6 +13,8 @@ export type Candidate = {
   similarityPercent: number; // 92
   riskLabel: string; // "딥페이크 위험도 · 높음"
   riskLevel: RiskLevel;
+  sourceLabel: string; // "공개 SNS"
+  thumbnailUrl: string | null;
 };
 
 export type CandidateDetail = Candidate & {
