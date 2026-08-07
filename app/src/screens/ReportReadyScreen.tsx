@@ -6,11 +6,7 @@ import { PrimaryButton, SecondaryButton } from '../components/Button';
 import { colors, radii, spacing, typography } from '../theme';
 import { saveReportPackage } from '../services/reportApi';
 
-const GENERATED_FILES = [
-  { label: '플랫폼 신고용 요약서', value: 'PDF 1개' },
-  { label: '수사기관 제출용 증거 목록', value: 'PDF 1개' },
-  { label: '캡처·해시 원본', value: 'ZIP 1개' },
-];
+const GENERATED_FILES = [{ label: '증거·신고서 요약', value: '텍스트 파일 1개' }];
 
 function formatGeneratedAt(date: Date) {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -20,11 +16,18 @@ function formatGeneratedAt(date: Date) {
 export function ReportReadyScreen({ onGoHome }: { onGoHome: () => void }) {
   const [generatedAt] = useState(() => formatGeneratedAt(new Date()));
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   const handleSave = async () => {
     setIsSaving(true);
+    setSaveError(null);
+    setSaved(false);
     try {
       await saveReportPackage();
+      setSaved(true);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : '신고자료 저장에 실패했습니다.');
     } finally {
       setIsSaving(false);
     }
@@ -70,6 +73,8 @@ export function ReportReadyScreen({ onGoHome }: { onGoHome: () => void }) {
       </ScrollView>
 
       <View style={styles.bottomCta}>
+        {saveError && <Text style={styles.saveError}>{saveError}</Text>}
+        {saved && !saveError && <Text style={styles.saveSuccess}>기기에 자료를 저장했습니다.</Text>}
         <SecondaryButton label={isSaving ? '저장 중...' : '자료 패키지 저장'} onPress={handleSave} disabled={isSaving} />
         <PrimaryButton label="홈으로 돌아가기" onPress={onGoHome} />
       </View>
@@ -127,4 +132,6 @@ const styles = StyleSheet.create({
   nextActionsTitle: { ...typography.bodyStrong, color: colors.text900 },
   nextActionsItem: { ...typography.caption, color: colors.text700 },
   bottomCta: { width: '100%', paddingBottom: spacing.lg, gap: spacing.sm },
+  saveError: { ...typography.caption, color: colors.amber600, textAlign: 'center' },
+  saveSuccess: { ...typography.caption, color: colors.green600, textAlign: 'center' },
 });

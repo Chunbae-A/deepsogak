@@ -2,12 +2,14 @@ import hashlib
 import io
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 import imagehash
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
@@ -33,6 +35,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 app.mount("/static", StaticFiles(directory=STORAGE_DIR), name="static")
 
@@ -275,8 +278,7 @@ def confirm_candidates(body: ConfirmCandidatesBody):
     return {"ok": True, "keepIds": body.keepIds}
 
 
-@app.get("/api/report/draft")
-def get_report_draft():
+def _build_report_draft() -> list[dict]:
     matches = _get_active_matches()
     primary_index = next(
         (int(cid[1:]) - 1 for cid in _confirmed_keep_ids if matches and 0 <= int(cid[1:]) - 1 < len(matches)),
@@ -308,11 +310,41 @@ def get_report_draft():
     ]
 
 
+@app.get("/api/report/draft")
+def get_report_draft():
+    return _build_report_draft()
+
+
 @app.post("/api/report/consent")
 def submit_report_consent():
     global REPORT_COUNT
     REPORT_COUNT += 1
     return {"ok": True}
+
+
+@app.get("/api/report/package")
+def get_report_package():
+    """동의된 증거 초안을 실제 파일(텍스트)로 묶어 내려준다. PDF·ZIP 생성기는 아직 없어
+    프로토타입 단계에서는 사람이 바로 읽을 수 있는 증거 요약 텍스트로 대신한다."""
+    draft = _build_report_draft()
+    generated_at = datetime.now().strftime("%Y.%m.%d %H:%M")
+    lines = [
+        "딥소각 증거·신고서 초안",
+        f"생성 시각: {generated_at}",
+        "",
+    ]
+    for field in draft:
+        lines.append(f"{field['label']}: {field['value']}")
+    lines.append("")
+    lines.append("※ 본 파일은 사용자가 동의한 시점의 증거 초안 요약이며, 최종 제출은 사용자가 직접 수행합니다.")
+    content = "\n".join(lines)
+
+    filename = f"deepsogak_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    return Response(
+        content=content.encode("utf-8"),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ---------------------------------------------------------------------------

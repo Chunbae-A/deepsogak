@@ -1,3 +1,6 @@
+import { Platform } from 'react-native';
+import * as Sharing from 'expo-sharing';
+import { Directory, File, Paths } from 'expo-file-system';
 import { API_BASE_URL } from '../config';
 
 // server/main.py의 /api/report/draft가 응답을 만든다. SHA-256/pHash/C2PA/AI 분석 결과는
@@ -23,7 +26,30 @@ export async function submitConsent(): Promise<void> {
   if (!res.ok) throw new Error('동의 처리에 실패했습니다.');
 }
 
-// TODO(AI 모델 연동): 동의 후 생성된 신고서 패키지(PDF·ZIP)를 기기에 저장한다.
+// 동의된 증거 초안을 실제 파일로 받아 기기(웹 다운로드 / 네이티브 공유 시트)에 저장한다.
+// PDF·ZIP 생성기는 아직 없어 서버가 사람이 읽을 수 있는 텍스트 요약으로 내려준다.
 export async function saveReportPackage(): Promise<void> {
-  // TODO: 실제 연동 시 expo-file-system(앱) / <a download>(웹)로 교체. 지금은 no-op.
+  const url = `${API_BASE_URL}/api/report/package`;
+  const filenameMatch = /filename="([^"]+)"/;
+
+  if (Platform.OS === 'web') {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('신고자료 저장에 실패했습니다.');
+    const filename = filenameMatch.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'deepsogak_report.txt';
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+    return;
+  }
+
+  const downloaded = await File.downloadFileAsync(url, new Directory(Paths.document));
+  if (await Sharing.isAvailableAsync()) {
+    await Sharing.shareAsync(downloaded.uri);
+  }
 }
