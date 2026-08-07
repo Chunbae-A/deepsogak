@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AppBar } from '../components/AppBar';
 import { StatusChip } from '../components/StatusChip';
 import { InfoPanel } from '../components/InfoPanel';
 import { PrimaryButton } from '../components/Button';
 import { LoadingView, ErrorView } from '../components/ScreenStatus';
 import { colors, radii, spacing, typography } from '../theme';
-import { fetchMonitoringSummary, MonitoringSummary } from '../services/monitoringApi';
+import { fetchMonitoringSummary, MonitoringSummary, submitManualReport } from '../services/monitoringApi';
 
 const addIcon = require('../../assets/icons/icon-add.png');
 
@@ -20,6 +20,11 @@ const SHORT_SOURCE_LABELS: Record<string, string> = {
 export function MonitoringScreen({ onConfirmCandidates }: { onConfirmCandidates: () => void }) {
   const [summary, setSummary] = useState<MonitoringSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isReportOpen, setIsReportOpen] = useState(false);
+  const [reportUrl, setReportUrl] = useState('');
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportDone, setReportDone] = useState(false);
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -38,6 +43,27 @@ export function MonitoringScreen({ onConfirmCandidates }: { onConfirmCandidates:
   }, []);
 
   useEffect(() => load(), [load]);
+
+  const handleToggleReport = () => {
+    setReportError(null);
+    setReportDone(false);
+    setIsReportOpen((prev) => !prev);
+  };
+
+  const handleSubmitReport = async () => {
+    setIsSubmittingReport(true);
+    setReportError(null);
+    try {
+      await submitManualReport(reportUrl);
+      setReportUrl('');
+      setReportDone(true);
+      load();
+    } catch (e) {
+      setReportError(e instanceof Error ? e.message : '제보 등록에 실패했습니다.');
+    } finally {
+      setIsSubmittingReport(false);
+    }
+  };
 
   return (
     <View style={styles.screen}>
@@ -87,7 +113,7 @@ export function MonitoringScreen({ onConfirmCandidates }: { onConfirmCandidates:
               body="비공개 계정과 암호화 메신저는 자동 탐색하지 않습니다."
             />
 
-            <View style={styles.directReport}>
+            <Pressable style={styles.directReport} onPress={handleToggleReport}>
               <View style={styles.directReportCopy}>
                 <Text style={styles.directReportTitle}>URL·캡처·파일 직접 제보</Text>
                 <Text style={styles.directReportBody}>제보 자료도 분석 후보에 포함할 수 있어요.</Text>
@@ -95,7 +121,28 @@ export function MonitoringScreen({ onConfirmCandidates }: { onConfirmCandidates:
               <View style={styles.addButton}>
                 <Image source={addIcon} style={styles.addIcon} resizeMode="contain" />
               </View>
-            </View>
+            </Pressable>
+
+            {isReportOpen && (
+              <View style={styles.reportForm}>
+                <TextInput
+                  style={styles.reportInput}
+                  placeholder="제보할 게시물 URL을 입력하세요"
+                  placeholderTextColor={colors.text500}
+                  value={reportUrl}
+                  onChangeText={setReportUrl}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {reportError && <Text style={styles.reportError}>{reportError}</Text>}
+                {reportDone && !reportError && <Text style={styles.reportSuccess}>제보가 등록됐습니다.</Text>}
+                <PrimaryButton
+                  label={isSubmittingReport ? '등록 중...' : '제보하기'}
+                  onPress={handleSubmitReport}
+                  disabled={isSubmittingReport || !reportUrl.trim()}
+                />
+              </View>
+            )}
           </ScrollView>
 
           <View style={styles.bottomCta}>
@@ -142,5 +189,23 @@ const styles = StyleSheet.create({
   directReportBody: { ...typography.caption, color: colors.text700 },
   addButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.blue100, alignItems: 'center', justifyContent: 'center' },
   addIcon: { width: 18, height: 18 },
+  reportForm: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  reportInput: {
+    height: 40,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.sm,
+    color: colors.text900,
+  },
+  reportError: { ...typography.caption, color: colors.amber600 },
+  reportSuccess: { ...typography.caption, color: colors.green600 },
   bottomCta: { width: '100%', paddingBottom: spacing.lg },
 });

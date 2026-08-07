@@ -20,6 +20,17 @@ export async function fetchEvidenceDraft(): Promise<EvidenceField[]> {
   return res.json();
 }
 
+// 사용자가 "직접 수정"으로 고친 증거 초안을 서버에 반영한다. 이후 동의·패키지 다운로드도
+// 이 수정된 값을 그대로 사용한다.
+export async function updateEvidenceDraft(fields: EvidenceField[]): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/report/draft`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields }),
+  });
+  if (!res.ok) throw new Error('증거 초안 수정에 실패했습니다.');
+}
+
 // 사용자가 초안에 동의하면 실제 신고서 제출/공식 채널 접수 단계로 넘어간다.
 export async function submitConsent(): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/api/report/consent`, { method: 'POST' });
