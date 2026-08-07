@@ -53,9 +53,9 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
     });
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = (onlyId?: string) => {
     if (!candidates) return;
-    const keepIds = candidates.filter((c) => !excludedIds.has(c.id)).map((c) => c.id);
+    const keepIds = onlyId ? [onlyId] : candidates.filter((c) => !excludedIds.has(c.id)).map((c) => c.id);
     confirmCandidateSelection(keepIds).catch(() => {});
     onConfirmSelection();
   };
@@ -68,7 +68,7 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
           toggleExclude(selectedCandidateId);
           setSelectedCandidateId(null);
         }}
-        onCreateReport={handleConfirm}
+        onCreateReport={() => handleConfirm(selectedCandidateId)}
       />
     );
   }
@@ -136,7 +136,7 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
           </ScrollView>
 
           <View style={styles.bottomCta}>
-            <PrimaryButton label="선택 후보 상세 분석" onPress={handleConfirm} />
+            <PrimaryButton label="선택 후보 상세 분석" onPress={() => handleConfirm()} />
           </View>
         </>
       )}

@@ -263,22 +263,48 @@ class ConfirmCandidatesBody(BaseModel):
     keepIds: list[str]
 
 
+# 후보 검토에서 "제외"하지 않고 남긴 후보 id들. 신고서 초안이 어떤 후보를 다룰지
+# 정하는 데 쓴다 (프로토타입 인메모리 저장소라 사용자·세션 구분 없이 마지막 선택만 남는다).
+_confirmed_keep_ids: list[str] = []
+
+
 @app.post("/api/monitoring/candidates/confirm")
 def confirm_candidates(body: ConfirmCandidatesBody):
+    global _confirmed_keep_ids
+    _confirmed_keep_ids = body.keepIds
     return {"ok": True, "keepIds": body.keepIds}
 
 
 @app.get("/api/report/draft")
 def get_report_draft():
+    matches = _get_active_matches()
+    primary_index = next(
+        (int(cid[1:]) - 1 for cid in _confirmed_keep_ids if matches and 0 <= int(cid[1:]) - 1 < len(matches)),
+        None,
+    )
+    if matches is None or primary_index is None:
+        return [
+            {"key": "postUrl", "label": "게시물 URL", "value": "example.com/p/1248"},
+            {"key": "account", "label": "게시 계정", "value": "@public_sample"},
+            {"key": "foundAt", "label": "발견 시각", "value": "2026.08.02 14:21"},
+            {"key": "capture", "label": "캡처 또는 파일", "value": "capture_01.png"},
+            {"key": "sha256", "label": "SHA-256", "value": "확인 완료"},
+            {"key": "phash", "label": "pHash", "value": "등록 완료"},
+            {"key": "c2pa", "label": "C2PA 확인 상태", "value": "원본 불일치"},
+            {"key": "aiResult", "label": "AI 분석 결과", "value": "위험도 높음"},
+        ]
+
+    m = matches[primary_index]
+    _, risk_label = _risk_from_similarity(m["similarity"])
     return [
-        {"key": "postUrl", "label": "게시물 URL", "value": "example.com/p/1248"},
-        {"key": "account", "label": "게시 계정", "value": "@public_sample"},
-        {"key": "foundAt", "label": "발견 시각", "value": "2026.08.02 14:21"},
-        {"key": "capture", "label": "캡처 또는 파일", "value": "capture_01.png"},
+        {"key": "postUrl", "label": "게시물 URL", "value": m["source_url"] or m["image_url"] or "-"},
+        {"key": "account", "label": "게시 계정", "value": "-"},
+        {"key": "foundAt", "label": "발견 시각", "value": "방금 확인"},
+        {"key": "capture", "label": "캡처 또는 파일", "value": "자동 수집 이미지" if m["image_url"] else "-"},
         {"key": "sha256", "label": "SHA-256", "value": "확인 완료"},
         {"key": "phash", "label": "pHash", "value": "등록 완료"},
         {"key": "c2pa", "label": "C2PA 확인 상태", "value": "원본 불일치"},
-        {"key": "aiResult", "label": "AI 분석 결과", "value": "위험도 높음"},
+        {"key": "aiResult", "label": "AI 분석 결과", "value": risk_label},
     ]
 
 
