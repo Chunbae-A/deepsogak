@@ -97,6 +97,34 @@ export function ProtectionResultScreen({
               ))}
             </View>
 
+            <View style={styles.modelCard}>
+              <Text style={styles.resultsTitle}>AI 모델 연결 시험</Text>
+              <Text style={styles.modelStatus}>
+                {result.modelAnalysis.status === 'completed'
+                  ? '실제 ArcFace·ONNX 응답 완료'
+                  : result.modelAnalysis.status === 'partial_failed'
+                    ? '일부 모델 응답 실패'
+                    : '모델 API 연결 실패'}
+              </Text>
+              <View style={styles.modelMetricRow}>
+                <Text style={styles.modelMetricLabel}>원본↔보호본 얼굴 유사도</Text>
+                <Text style={styles.modelMetricValue}>
+                  {result.modelAnalysis.identity.similarity == null
+                    ? '-'
+                    : result.modelAnalysis.identity.similarity.toFixed(4)}
+                </Text>
+              </View>
+              <View style={styles.modelMetricRow}>
+                <Text style={styles.modelMetricLabel}>딥페이크 분석 원점수</Text>
+                <Text style={styles.modelMetricValue}>
+                  {result.modelAnalysis.deepfake.deepfakeScore == null
+                    ? '-'
+                    : result.modelAnalysis.deepfake.deepfakeScore.toFixed(6)}
+                </Text>
+              </View>
+              <Text style={styles.modelWarning}>{result.modelAnalysis.warning}</Text>
+            </View>
+
             <InfoPanel
               title="중요한 한계"
               body="딥페이크 생성을 100% 차단하지는 않습니다. 게시 후 공개 노출 모니터링을 함께 사용하세요."
@@ -159,6 +187,20 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   resultsTitle: { ...typography.bodyStrong, color: colors.text900 },
+  modelCard: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.blue600,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    gap: spacing.sm,
+    width: '100%',
+  },
+  modelStatus: { ...typography.label, color: colors.green600, fontWeight: '700' },
+  modelMetricRow: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md },
+  modelMetricLabel: { ...typography.caption, color: colors.text700, flex: 1 },
+  modelMetricValue: { ...typography.bodyStrong, color: colors.text900 },
+  modelWarning: { ...typography.caption, color: colors.amber600 },
   bottomCta: { width: '100%', paddingBottom: spacing.lg, gap: spacing.sm },
   saveError: { ...typography.caption, color: colors.amber600, textAlign: 'center' },
   saveSuccess: { ...typography.caption, color: colors.green600, textAlign: 'center' },

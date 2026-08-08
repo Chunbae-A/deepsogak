@@ -73,7 +73,7 @@ export function HomeScreen({
             <Pressable style={styles.quickAction} onPress={onStartProtection}>
               <View>
                 <Text style={styles.quickActionTitle}>게시할 사진 보호하기</Text>
-                <Text style={styles.quickActionBody}>EXIF 제거·딥백신·C2PA·해시 생성</Text>
+                <Text style={styles.quickActionBody}>EXIF 제거·해시 생성·AI 모델 연결 시험</Text>
               </View>
               <Image source={arrowIcon} style={styles.arrowIcon} resizeMode="contain" />
             </Pressable>

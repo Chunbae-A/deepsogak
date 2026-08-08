@@ -13,7 +13,9 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
+import model_api
 import vision_scan
 
 load_dotenv()
@@ -81,12 +83,20 @@ async def process_protection(photo: UploadFile):
     protected_bytes = protected_path.read_bytes()
     sha256 = hashlib.sha256(protected_bytes).hexdigest()
     phash = str(imagehash.phash(clean_image))
+    content_type = "image/png" if image.format == "PNG" else "image/jpeg"
+    model_analysis = await run_in_threadpool(
+        model_api.analyze_protected_photo,
+        raw,
+        protected_bytes,
+        content_type=content_type,
+    )
 
     JOBS[job_id] = {
         "originalPath": original_path,
         "protectedPath": protected_path,
         "sha256": sha256,
         "phash": phash,
+        "modelAnalysis": model_analysis,
         "createdAt": time.time(),
     }
 
@@ -106,13 +116,22 @@ def get_protection_result(jobId: str):
         "protectedPhotoUrl": f"/static/protected/{job['protectedPath'].name}",
         "sha256": job["sha256"],
         "phash": job["phash"],
+        "modelAnalysis": job["modelAnalysis"],
         "appliedChecks": [
-            "딥백신 Beta 적용 완료",
             "불필요한 위치정보 제거 완료",
-            "C2PA 출처정보 생성 완료",
-            "SHA-256·pHash 등록 완료",
+            "SHA-256·pHash 생성 완료",
+            (
+                "AI 모델 연결 시험 완료"
+                if job["modelAnalysis"]["status"] == "completed"
+                else "AI 모델 연결 시험 일부 또는 전체 미완료"
+            ),
         ],
     }
+
+
+@app.get("/api/model/health")
+def get_model_health():
+    return model_api.health()
 
 
 @app.post("/api/protection/save")

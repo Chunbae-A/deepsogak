@@ -1,0 +1,55 @@
+name: app-model-integration-ci
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "server/**"
+      - ".github/workflows/app-model-integration-ci.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "app/**"
+      - "server/**"
+      - ".github/workflows/app-model-integration-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  server-adapter-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+      - name: 서버 의존성 설치
+        run: python -m pip install --requirement requirements.txt
+      - name: 모델 API 어댑터 테스트
+        run: python -m unittest -v test_model_api.py
+
+  app-typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: 앱 의존성 설치
+        run: npm ci --no-audit --no-fund
+      - name: TypeScript 검사
+        run: npx tsc --noEmit

@@ -46,9 +46,9 @@ async function buildFormData(photo: SelectedPhoto): Promise<FormData> {
   return formData;
 }
 
-// EXIF·GPS 제거, C2PA 서명, SHA-256/pHash 계산은 server/main.py의
-// POST /api/protection/process가 실제로 처리한다. 딥백신 Beta(적대적 노이즈) 적용은
-// 아직 모델이 없어 서버에도 TODO로 남아 있다.
+// EXIF·GPS 제거와 SHA-256/pHash 계산은 server/main.py가 실제로 처리한다.
+// 보호 전후 얼굴 유지와 딥페이크 연결 시험은 모노레포 모델 API가 담당한다.
+// C2PA 서명과 딥백신 Beta는 아직 구현되지 않았다.
 export async function startProtection(photo: SelectedPhoto): Promise<string> {
   const formData = await buildFormData(photo);
   const res = await fetch(`${API_BASE_URL}/api/protection/process`, {

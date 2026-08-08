@@ -10,7 +10,7 @@ import { SelectedPhoto } from '../services/safeUploadApi';
 
 const uploadIcon = require('../../assets/icons/icon-upload.png');
 
-const STAGES = ['EXIF·GPS 정보 제거', '딥백신 Beta 적용', 'C2PA·SHA-256·pHash 생성'];
+const STAGES = ['EXIF·GPS 정보 제거', 'SHA-256·pHash 생성', 'ArcFace·ONNX 모델 분석'];
 
 export function ProtectingScreen({ photo }: { photo: SelectedPhoto }) {
   const [percent, setPercent] = useState(8);
@@ -32,7 +32,7 @@ export function ProtectingScreen({ photo }: { photo: SelectedPhoto }) {
       <ScrollView style={styles.content} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
         <View style={styles.headerCopy}>
           <Text style={styles.title}>사진을 보호하고 있어요</Text>
-          <Text style={styles.subtitle}>원본은 기기에 두고 보호 설정을 순서대로 적용합니다.</Text>
+          <Text style={styles.subtitle}>로컬 개발 서버에서 보호 설정과 AI 연결 시험을 순서대로 적용합니다.</Text>
         </View>
 
         <View style={styles.photoPreview}>
@@ -68,7 +68,7 @@ export function ProtectingScreen({ photo }: { photo: SelectedPhoto }) {
           )}
         </View>
 
-        <InfoPanel title="앱을 닫아도 계속 처리돼요" body="완료되면 기기 알림으로 알려드립니다." />
+        <InfoPanel title="처리 중에는 화면을 유지해 주세요" body="현재 데모는 서버 응답이 오면 자동으로 결과 화면으로 이동합니다." />
       </ScrollView>
 
       <View style={styles.bottomCta}>

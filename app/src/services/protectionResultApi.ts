@@ -4,8 +4,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 import { API_BASE_URL } from '../config';
 
 // EXIF·GPS 제거, SHA-256/pHash 계산은 server/main.py가 실제로 처리해 반환한다.
-// 딥백신 Beta(적대적 노이즈)·C2PA 서명은 아직 모델·서명 인프라가 없어
-// 서버에서도 "완료" 여부만 표시하는 수준으로 시뮬레이션되어 있다 (server/main.py 참고).
+// 딥백신 Beta(적대적 노이즈)와 C2PA 서명은 아직 구현되지 않아 적용 결과에 넣지 않는다.
 
 export type ProtectionResult = {
   originalLabel: string;
@@ -13,6 +12,38 @@ export type ProtectionResult = {
   originalPhotoUrl: string;
   protectedPhotoUrl: string;
   appliedChecks: string[];
+  modelAnalysis: ModelAnalysis;
+};
+
+export type ModelAnalysisStep = {
+  status: 'completed' | 'failed' | 'unavailable';
+  errorCode?: string;
+};
+
+export type IdentityAnalysis = ModelAnalysisStep & {
+  isSamePerson?: boolean;
+  similarity?: number;
+  threshold?: number;
+  thresholdStatus?: string;
+  processingMs?: number;
+  modelName?: string;
+};
+
+export type DeepfakeAnalysis = ModelAnalysisStep & {
+  isSuspectedDeepfake?: boolean;
+  deepfakeScore?: number;
+  threshold?: number;
+  thresholdStatus?: string;
+  processingMs?: number;
+  inferenceMs?: number;
+  modelName?: string;
+};
+
+export type ModelAnalysis = {
+  status: 'completed' | 'partial_failed' | 'unavailable';
+  identity: IdentityAnalysis;
+  deepfake: DeepfakeAnalysis;
+  warning: string;
 };
 
 export async function fetchProtectionResult(jobId: string): Promise<ProtectionResult> {

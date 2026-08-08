@@ -12,9 +12,9 @@ const uploadIcon = require('../../assets/icons/icon-upload.png');
 
 const PROTECTION_FEATURES = [
   '불필요한 EXIF·GPS 정보 제거',
-  '딥백신 Beta 적용',
-  'C2PA 출처정보 생성',
   'SHA-256·pHash 생성',
+  'ArcFace 보호 전후 얼굴 확인',
+  'ONNX 딥페이크 연결 시험',
 ];
 
 export function SafeUploadScreen({ onCreateProtectedPhoto }: { onCreateProtectedPhoto: (jobId: string) => void }) {
@@ -77,17 +77,17 @@ export function SafeUploadScreen({ onCreateProtectedPhoto }: { onCreateProtected
         </View>
 
         <InfoPanel
-          title="딥백신 Beta 안내"
-          body="AI 합성을 완전히 차단하지는 않으며, 무단 합성의 난이도를 높이는 예방 기능입니다."
+          title="딥백신 Beta 계획"
+          body="적대적 노이즈 기반 보호는 아직 적용되지 않았습니다. 이번 데모는 EXIF 제거와 모델 API 연결만 검증합니다."
         />
         <InfoPanel
-          title="얼굴 정보는 기기 안에서 처리"
-          body="등록용 셀카는 기기에서 특징 벡터로 변환되며, 원본 셀카를 서버에 저장하지 않습니다."
+          title="현재 데모의 얼굴 정보 처리"
+          body="선택한 사진은 로컬 개발 서버와 모델 API에서 처리됩니다. 실제 운영 전에는 암호화·보관 기간·삭제 정책을 추가해야 합니다."
         />
       </ScrollView>
 
       <View style={styles.bottomCta}>
-        <Text style={styles.bottomHint}>{uploadError ?? '사진은 이 기기에서 안전하게 처리됩니다'}</Text>
+        <Text style={styles.bottomHint}>{uploadError ?? '사진은 로컬 개발 서버로 전송됩니다'}</Text>
         <PrimaryButton label="보호사진 만들기" onPress={handleCreate} disabled={!photo} />
       </View>
     </View>
