@@ -1,38 +1,46 @@
 import { API_BASE_URL } from '../config';
 
-// server/main.py의 /api/monitoring/candidates가 응답을 만든다. similarityPercent(ArcFace
-// 코사인 유사도)와 riskLabel/riskLevel(EfficientNet-B4 딥페이크 판별)은 아직 모델이
-// 없어 서버도 고정된 시뮬레이션 데이터를 반환한다 — 진짜 모델이 붙으면
-// server/main.py의 get_candidates 내부만 교체하면 된다.
-
 export type RiskLevel = 'high' | 'medium' | 'low' | 'exclude-recommended';
+export type RecommendedAction =
+  | 'review_required'
+  | 'identity_review_required'
+  | 'monitor'
+  | 'exclude_recommended'
+  | 'analysis_unavailable';
 
 export type Candidate = {
   id: string;
-  label: string; // "후보 1"
-  similarityPercent: number; // 92
-  riskLabel: string; // "딥페이크 위험도 · 높음"
+  label: string;
+  faceSimilarity: number | null;
+  deepfakeScore: number | null;
+  faceMatchLevel: 'matched' | 'review' | 'not_matched' | 'unavailable';
+  deepfakeSignal: 'suspected' | 'not_suspected' | 'not_analyzed' | 'unavailable';
+  recommendedAction: RecommendedAction;
+  analysisStatus: 'completed' | 'partial_failed' | 'unavailable';
+  riskLabel: string;
   riskLevel: RiskLevel;
-  sourceLabel: string; // "공개 SNS"
+  sourceLabel: string;
   thumbnailUrl: string | null;
+  warning: string;
 };
 
 export type CandidateDetail = Candidate & {
-  sourceLabel: string; // "공개 SNS"
   sourceUrl: string;
   sourceAccount: string;
   foundAt: string;
   signals: string[];
 };
 
-export async function fetchCandidates(): Promise<Candidate[]> {
-  const res = await fetch(`${API_BASE_URL}/api/monitoring/candidates`);
+export async function fetchCandidates(scanId: string): Promise<Candidate[]> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/monitoring/scans/${encodeURIComponent(scanId)}/candidates`,
+  );
   if (!res.ok) throw new Error('후보 목록을 불러오지 못했습니다.');
   return res.json();
 }
 
 export async function fetchCandidateDetail(id: string): Promise<CandidateDetail> {
-  const res = await fetch(`${API_BASE_URL}/api/monitoring/candidates/${id}`);
+  const res = await fetch(`${API_BASE_URL}/api/monitoring/candidates/${encodeURIComponent(id)}`);
   if (!res.ok) throw new Error('후보 상세 정보를 불러오지 못했습니다.');
   return res.json();
 }

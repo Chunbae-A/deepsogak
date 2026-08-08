@@ -14,6 +14,15 @@ RESEARCH_WARNING = (
 )
 
 
+class ModelApiError(RuntimeError):
+    """모델 API 장애를 프론트에 민감정보 없이 전달하기 위한 안정된 오류."""
+
+    def __init__(self, code: str, *, unavailable: bool = False) -> None:
+        super().__init__(code)
+        self.code = code
+        self.unavailable = unavailable
+
+
 def _base_url() -> str:
     return os.getenv("FACEGUARD_MODEL_API_URL", DEFAULT_BASE_URL).rstrip("/")
 
@@ -27,6 +36,21 @@ def _failed_result(error_code: str, *, unavailable: bool = False) -> dict[str, A
         "status": "unavailable" if unavailable else "failed",
         "errorCode": error_code,
     }
+
+
+def _response_json(response: requests.Response, *, operation: str) -> dict[str, Any]:
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as error:
+        status_code = error.response.status_code if error.response is not None else 500
+        raise ModelApiError(f"{operation}_HTTP_{status_code}") from error
+    try:
+        payload = response.json()
+    except (TypeError, ValueError) as error:
+        raise ModelApiError(f"{operation}_INVALID_RESPONSE") from error
+    if not isinstance(payload, dict):
+        raise ModelApiError(f"{operation}_INVALID_RESPONSE")
+    return payload
 
 
 def health() -> dict[str, Any]:
@@ -53,6 +77,93 @@ def health() -> dict[str, Any]:
         "executionProvider": payload.get("execution_provider"),
         "deepfakeExecutionProvider": payload.get("deepfake_execution_provider"),
     }
+
+
+def create_face_enrollment(
+    reference_images: list[tuple[bytes, str]],
+) -> dict[str, Any]:
+    """동의받은 등록 사진을 모델 API 메모리에 임시 등록한다."""
+
+    if not reference_images:
+        raise ModelApiError("MODEL_API_ENROLLMENT_NO_REFERENCES")
+    files = [
+        (
+            "reference_images",
+            (f"reference-{index}", payload, content_type),
+        )
+        for index, (payload, content_type) in enumerate(reference_images, start=1)
+    ]
+    try:
+        response = requests.post(
+            f"{_base_url()}/v1/faceguard/enrollments",
+            files=files,
+            timeout=_timeout_seconds(),
+        )
+    except requests.RequestException as error:
+        raise ModelApiError(
+            "MODEL_API_ENROLLMENT_REQUEST_FAILED", unavailable=True
+        ) from error
+    return _response_json(response, operation="MODEL_API_ENROLLMENT")
+
+
+def start_exposure_scan(
+    enrollment_id: str,
+    *,
+    query_text: str,
+    maximum_results: int = 5,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    """동의된 키워드로 공개 후보 검색과 AI 분석 작업을 시작한다."""
+
+    headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+    try:
+        response = requests.post(
+            f"{_base_url()}/v1/exposure-scans",
+            json={
+                "enrollment_id": enrollment_id,
+                "privacy_mode": "web_monitoring",
+                "web_monitoring_consent": True,
+                "query_text": query_text,
+                "maximum_results": maximum_results,
+            },
+            headers=headers,
+            timeout=_timeout_seconds(),
+        )
+    except requests.RequestException as error:
+        raise ModelApiError(
+            "MODEL_API_SCAN_START_REQUEST_FAILED", unavailable=True
+        ) from error
+    return _response_json(response, operation="MODEL_API_SCAN_START")
+
+
+def get_exposure_scan(scan_id: str) -> dict[str, Any]:
+    """비동기 공개 노출 스캔의 현재 진행 상태를 조회한다."""
+
+    try:
+        response = requests.get(
+            f"{_base_url()}/v1/exposure-scans/{scan_id}",
+            timeout=_timeout_seconds(),
+        )
+    except requests.RequestException as error:
+        raise ModelApiError(
+            "MODEL_API_SCAN_STATUS_REQUEST_FAILED", unavailable=True
+        ) from error
+    return _response_json(response, operation="MODEL_API_SCAN_STATUS")
+
+
+def get_client_exposure_candidates(scan_id: str) -> dict[str, Any]:
+    """프론트 화면에 필요한 후보와 안전한 검토 행동값을 조회한다."""
+
+    try:
+        response = requests.get(
+            f"{_base_url()}/v1/exposure-scans/{scan_id}/client-candidates",
+            timeout=_timeout_seconds(),
+        )
+    except requests.RequestException as error:
+        raise ModelApiError(
+            "MODEL_API_SCAN_CANDIDATES_REQUEST_FAILED", unavailable=True
+        ) from error
+    return _response_json(response, operation="MODEL_API_SCAN_CANDIDATES")
 
 
 def _verify_identity(

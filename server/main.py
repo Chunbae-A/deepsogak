@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 import model_api
@@ -43,6 +43,8 @@ app.mount("/static", StaticFiles(directory=STORAGE_DIR), name="static")
 
 # 프로토타입용 인메모리 저장소. 실서비스에서는 DB로 교체한다.
 JOBS: dict[str, dict] = {}
+MONITORING_SCANS: dict[str, dict] = {}
+MODEL_CANDIDATES: dict[str, dict] = {}
 REPORT_COUNT = 0
 
 
@@ -97,6 +99,7 @@ async def process_protection(photo: UploadFile):
         "sha256": sha256,
         "phash": phash,
         "modelAnalysis": model_analysis,
+        "contentType": content_type,
         "createdAt": time.time(),
     }
 
@@ -148,10 +151,9 @@ def save_protection(jobId: str):
 
 
 # ---------------------------------------------------------------------------
-# 얼굴가드: GOOGLE_VISION_API_KEY가 있으면 vision_scan으로 실제 역이미지 검색 +
-# pHash 실측 검증을 수행한다 (참고: https://github.com/BcKmini/copycat-watch).
-# 키가 없거나 아직 보호사진을 만들지 않았으면 고정된 시뮬레이션 데이터로 폴백한다.
-# 딥페이크 판별(EfficientNet-B4) 모델은 아직 없어 riskLevel은 pHash 유사도로 근사한다.
+# 얼굴가드의 새 앱 흐름은 /api/monitoring/scans API에서 SearXNG → ArcFace → ONNX를
+# 사용한다. 아래 vision_scan·pHash 함수와 고정 데이터 API는 이전 클라이언트 호환용으로
+# 남겨 둔 레거시 경로이며 새 MonitoringScreen에서는 호출하지 않는다.
 # ---------------------------------------------------------------------------
 
 _scan_cache: dict = {"job_id": None, "matches": None}
@@ -183,6 +185,259 @@ def _risk_from_similarity(similarity: float) -> tuple[str, str]:
 # 사용자가 "URL·캡처·파일 직접 제보"로 추가한 항목. 자동 순찰 대상이 아닌 비공개
 # 채널을 지인 제보로 보완하는 기획서 2.2절 "제보 경로"를 실제로 반영한다.
 _manual_reports: list[dict] = []  # [{"url": str}]
+
+
+class StartMonitoringScanBody(BaseModel):
+    queryText: str = Field(min_length=1, max_length=200)
+    webMonitoringConsent: bool
+    referenceJobIds: list[str] = Field(min_length=1, max_length=5)
+    maximumResults: int = Field(default=5, ge=1, le=10)
+
+
+def _raise_model_api_http(error: model_api.ModelApiError) -> None:
+    status_code = 503 if error.unavailable else 502
+    raise HTTPException(
+        status_code=status_code,
+        detail={
+            "code": error.code,
+            "message": (
+                "얼굴가드 모델 API에 연결할 수 없습니다."
+                if error.unavailable
+                else "얼굴가드 모델 API가 요청을 처리하지 못했습니다."
+            ),
+        },
+    )
+
+
+def _monitoring_record(scan_id: str) -> dict:
+    record = MONITORING_SCANS.get(scan_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="모니터링 작업을 찾을 수 없습니다.")
+    return record
+
+
+def _candidate_risk(candidate: dict) -> tuple[str, str]:
+    action = candidate.get("recommended_action")
+    if action == "review_required":
+        return "high", "조작 의심 신호 · 검토 필요"
+    if action == "identity_review_required":
+        return "medium", "본인 여부 · 검토 필요"
+    if action == "monitor":
+        return "low", "조작 의심 신호 미검출 · 모니터링"
+    if action == "exclude_recommended":
+        return "exclude-recommended", "다른 사람 가능성 · 제외 권장"
+    return "medium", "분석 실패 · 원문 확인 필요"
+
+
+def _score_signal(label: str, value: object) -> str:
+    if isinstance(value, (int, float)):
+        return f"{label} {float(value):.3f} (확률 아님)"
+    return f"{label}을 계산하지 못함"
+
+
+def _client_candidate(candidate: dict, index: int) -> dict:
+    risk_level, risk_label = _candidate_risk(candidate)
+    source_engine = candidate.get("source_engine")
+    source_type = candidate.get("source_type")
+    source_label = str(source_engine or source_type or "공개 웹")
+    candidate_id = str(candidate.get("candidate_id") or f"unknown-{index}")
+    source_url = str(candidate.get("source_url") or "-")
+    result = {
+        "id": candidate_id,
+        "label": f"후보 {index}",
+        "faceSimilarity": candidate.get("face_similarity"),
+        "deepfakeScore": candidate.get("deepfake_score"),
+        "faceMatchLevel": candidate.get("face_match_level", "unavailable"),
+        "deepfakeSignal": candidate.get("deepfake_signal", "unavailable"),
+        "recommendedAction": candidate.get(
+            "recommended_action", "analysis_unavailable"
+        ),
+        "analysisStatus": candidate.get("analysis_status", "unavailable"),
+        "riskLabel": risk_label,
+        "riskLevel": risk_level,
+        "sourceLabel": source_label,
+        "thumbnailUrl": candidate.get("thumbnail_url")
+        or candidate.get("media_url"),
+        "sourceUrl": source_url,
+        "sourceAccount": "-",
+        "foundAt": "이번 공개 검색에서 발견",
+        "signals": [
+            _score_signal("ArcFace 얼굴 유사도 원점수", candidate.get("face_similarity")),
+            _score_signal("딥페이크 모델 원점수", candidate.get("deepfake_score")),
+            "AI 결과는 자동 신고·삭제가 아닌 사람 검토용 후보 신호",
+        ],
+        "warning": candidate.get("warning") or model_api.RESEARCH_WARNING,
+    }
+    MODEL_CANDIDATES[candidate_id] = result
+    return result
+
+
+def _manual_client_candidate(report: dict, index: int) -> dict:
+    candidate_id = f"manual-{index}"
+    result = {
+        "id": candidate_id,
+        "label": f"후보 {index}",
+        "faceSimilarity": None,
+        "deepfakeScore": None,
+        "faceMatchLevel": "unavailable",
+        "deepfakeSignal": "not_analyzed",
+        "recommendedAction": "analysis_unavailable",
+        "analysisStatus": "unavailable",
+        "riskLabel": "직접 제보 · 원문 검토 필요",
+        "riskLevel": "medium",
+        "sourceLabel": "직접 제보",
+        "thumbnailUrl": None,
+        "sourceUrl": report["url"],
+        "sourceAccount": "-",
+        "foundAt": "방금 제보",
+        "signals": [
+            "사용자가 직접 제출한 URL",
+            "자동 얼굴·딥페이크 분석을 완료하지 않은 검토 대기 자료",
+        ],
+        "warning": model_api.RESEARCH_WARNING,
+    }
+    MODEL_CANDIDATES[candidate_id] = result
+    return result
+
+
+async def _scan_client_candidates(scan_id: str) -> list[dict]:
+    _monitoring_record(scan_id)
+    try:
+        payload = await run_in_threadpool(
+            model_api.get_client_exposure_candidates, scan_id
+        )
+    except model_api.ModelApiError as error:
+        _raise_model_api_http(error)
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list):
+        raise HTTPException(status_code=502, detail="모델 후보 응답 형식이 올바르지 않습니다.")
+    result = [
+        _client_candidate(candidate, index)
+        for index, candidate in enumerate(candidates, start=1)
+        if isinstance(candidate, dict)
+    ]
+    result.extend(
+        _manual_client_candidate(report, len(result) + index)
+        for index, report in enumerate(_manual_reports, start=1)
+    )
+    return result
+
+
+@app.post("/api/monitoring/scans", status_code=202)
+async def start_monitoring_scan(body: StartMonitoringScanBody):
+    if not body.webMonitoringConsent:
+        raise HTTPException(
+            status_code=400,
+            detail="공개 웹 검색을 시작하려면 명시적 동의가 필요합니다.",
+        )
+    query_text = body.queryText.strip()
+    if not query_text:
+        raise HTTPException(status_code=400, detail="공개 검색어를 입력해 주세요.")
+
+    reference_images: list[tuple[bytes, str]] = []
+    missing_job_ids: list[str] = []
+    for job_id in dict.fromkeys(body.referenceJobIds):
+        job = JOBS.get(job_id)
+        if job is None:
+            missing_job_ids.append(job_id)
+            continue
+        try:
+            reference_images.append(
+                (
+                    job["originalPath"].read_bytes(),
+                    job.get("contentType", "image/jpeg"),
+                )
+            )
+        except OSError:
+            raise HTTPException(
+                status_code=500, detail="등록 사진을 읽지 못했습니다. 다시 업로드해 주세요."
+            )
+    if missing_job_ids:
+        raise HTTPException(
+            status_code=404,
+            detail="등록 사진 처리 결과를 찾을 수 없습니다. 다시 업로드해 주세요.",
+        )
+
+    try:
+        enrollment = await run_in_threadpool(
+            model_api.create_face_enrollment, reference_images
+        )
+        enrollment_id = enrollment.get("enrollment_id")
+        if not isinstance(enrollment_id, str) or not enrollment_id:
+            raise model_api.ModelApiError("MODEL_API_ENROLLMENT_INVALID_RESPONSE")
+        scan = await run_in_threadpool(
+            model_api.start_exposure_scan,
+            enrollment_id,
+            query_text=query_text,
+            maximum_results=body.maximumResults,
+            idempotency_key=f"deepsogak-monitoring-{uuid.uuid4().hex}",
+        )
+    except model_api.ModelApiError as error:
+        _raise_model_api_http(error)
+
+    scan_id = scan.get("scan_id")
+    if not isinstance(scan_id, str) or not scan_id:
+        _raise_model_api_http(
+            model_api.ModelApiError("MODEL_API_SCAN_START_INVALID_RESPONSE")
+        )
+    MONITORING_SCANS[scan_id] = {
+        "enrollmentId": enrollment_id,
+        "referenceJobIds": list(dict.fromkeys(body.referenceJobIds)),
+        "queryText": query_text,
+        "createdAt": time.time(),
+    }
+    return {
+        "scanId": scan_id,
+        "status": scan.get("status", "queued"),
+        "statusUrl": f"/api/monitoring/scans/{scan_id}",
+        "candidatesUrl": f"/api/monitoring/scans/{scan_id}/candidates",
+        "referenceCount": len(reference_images),
+        "recommendedReferenceCount": 3,
+        "warning": scan.get("warning") or model_api.RESEARCH_WARNING,
+    }
+
+
+@app.get("/api/monitoring/scans/{scan_id}")
+async def get_monitoring_scan(scan_id: str):
+    _monitoring_record(scan_id)
+    try:
+        payload = await run_in_threadpool(model_api.get_exposure_scan, scan_id)
+    except model_api.ModelApiError as error:
+        _raise_model_api_http(error)
+    progress = payload.get("progress") if isinstance(payload.get("progress"), dict) else {}
+    return {
+        "scanId": scan_id,
+        "status": payload.get("status", "failed"),
+        "progressPercent": payload.get("progress_percent", 0),
+        "searchedCandidateCount": progress.get("searched_candidate_count", 0),
+        "analyzedCandidateCount": progress.get("analyzed_candidate_count", 0),
+        "identityMatchCount": progress.get("identity_match_count", 0),
+        "deepfakeCompletedCount": progress.get("deepfake_completed_count", 0),
+        "errorCode": payload.get("error_code"),
+        "warning": payload.get("warning") or model_api.RESEARCH_WARNING,
+    }
+
+
+@app.get("/api/monitoring/scans/{scan_id}/candidates")
+async def get_monitoring_scan_candidates(scan_id: str):
+    return await _scan_client_candidates(scan_id)
+
+
+@app.get("/api/monitoring/scans/{scan_id}/summary")
+async def get_monitoring_scan_summary(scan_id: str):
+    candidates = await _scan_client_candidates(scan_id)
+    counts: dict[str, int] = {}
+    for candidate in candidates:
+        source_label = candidate["sourceLabel"]
+        counts[source_label] = counts.get(source_label, 0) + 1
+    return {
+        "lastCheckedAt": "방금 확인",
+        "totalCandidates": len(candidates),
+        "sources": [
+            {"label": label, "count": f"{count}건"}
+            for label, count in counts.items()
+        ],
+    }
 
 
 class ManualReportBody(BaseModel):
@@ -290,6 +545,10 @@ CANDIDATE_DETAILS = {
 
 @app.get("/api/monitoring/candidates/{candidate_id}")
 def get_candidate_detail(candidate_id: str):
+    model_candidate = MODEL_CANDIDATES.get(candidate_id)
+    if model_candidate is not None:
+        return model_candidate
+
     base = next((c for c in get_candidates() if c["id"] == candidate_id), None)
     if base is None:
         raise HTTPException(status_code=404, detail="후보를 찾을 수 없습니다.")
@@ -353,9 +612,43 @@ def _build_report_draft() -> list[dict]:
     if _draft_overrides is not None:
         return _draft_overrides
 
+    primary_id = _confirmed_keep_ids[0] if _confirmed_keep_ids else None
+    if primary_id and primary_id in MODEL_CANDIDATES:
+        candidate = MODEL_CANDIDATES[primary_id]
+        face_score = candidate.get("faceSimilarity")
+        deepfake_score = candidate.get("deepfakeScore")
+        return [
+            {
+                "key": "postUrl",
+                "label": "게시물 URL",
+                "value": candidate.get("sourceUrl") or "-",
+            },
+            {"key": "account", "label": "게시 계정", "value": "-"},
+            {
+                "key": "foundAt",
+                "label": "발견 시각",
+                "value": candidate.get("foundAt") or "이번 공개 검색에서 발견",
+            },
+            {
+                "key": "capture",
+                "label": "캡처 또는 파일",
+                "value": candidate.get("thumbnailUrl") or "공개 후보 URL",
+            },
+            {"key": "sha256", "label": "SHA-256", "value": "아직 수집하지 않음"},
+            {"key": "phash", "label": "pHash", "value": "아직 수집하지 않음"},
+            {"key": "c2pa", "label": "C2PA 확인 상태", "value": "확인하지 않음"},
+            {
+                "key": "aiResult",
+                "label": "AI 분석 결과",
+                "value": (
+                    f"{candidate['riskLabel']} · 얼굴 원점수 "
+                    f"{face_score if face_score is not None else '-'} · 딥페이크 원점수 "
+                    f"{deepfake_score if deepfake_score is not None else '-'}"
+                ),
+            },
+        ]
     matches = _get_active_matches()
     base_count = len(matches) if matches is not None else 3
-    primary_id = _confirmed_keep_ids[0] if _confirmed_keep_ids else None
     primary_index = int(primary_id[1:]) - 1 if primary_id else None
 
     if primary_index is not None and primary_index >= base_count:

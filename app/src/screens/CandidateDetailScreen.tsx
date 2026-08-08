@@ -69,7 +69,9 @@ export function CandidateDetailScreen({
                   {detail.label} · {detail.sourceLabel}
                 </Text>
                 <Text style={styles.summaryText}>
-                  {isManualReport ? '제보 자료 · 검토 대기' : `얼굴 유사도 ${detail.similarityPercent}%`}
+                  {isManualReport || detail.faceSimilarity === null
+                    ? '얼굴 유사도 원점수 없음'
+                    : `얼굴 유사도 원점수 ${detail.faceSimilarity.toFixed(3)}`}
                 </Text>
                 <Text style={styles.summaryRisk}>{detail.riskLabel}</Text>
               </View>
@@ -92,12 +94,16 @@ export function CandidateDetailScreen({
 
             <View style={styles.metricsRow}>
               <View style={[styles.metricCard, styles.metricCardBlue]}>
-                <Text style={styles.metricLabel}>얼굴 유사도</Text>
-                <Text style={styles.metricValue}>{isManualReport ? '-' : `${detail.similarityPercent}%`}</Text>
+                <Text style={styles.metricLabel}>얼굴 유사도 원점수</Text>
+                <Text style={styles.metricValue}>
+                  {detail.faceSimilarity === null ? '-' : detail.faceSimilarity.toFixed(3)}
+                </Text>
               </View>
               <View style={[styles.metricCard, styles.metricCardAmber]}>
-                <Text style={styles.metricLabel}>딥페이크 위험도</Text>
-                <Text style={styles.metricValueAmber}>{detail.riskLabel.replace('딥페이크 위험도 · ', '')}</Text>
+                <Text style={styles.metricLabel}>딥페이크 원점수</Text>
+                <Text style={styles.metricValueAmber}>
+                  {detail.deepfakeScore === null ? '-' : detail.deepfakeScore.toFixed(3)}
+                </Text>
               </View>
             </View>
 
@@ -112,7 +118,7 @@ export function CandidateDetailScreen({
 
             <InfoPanel
               title="판단 기준 안내"
-              body="얼굴 유사도는 딥페이크 확률이 아니며, AI 분석은 최종 판단을 돕는 참고 정보입니다."
+              body="얼굴 유사도와 딥페이크 점수는 확률이 아니며, AI 분석은 최종 판단을 돕는 참고 정보입니다."
             />
           </ScrollView>
 

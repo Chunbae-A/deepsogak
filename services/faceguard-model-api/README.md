@@ -1,6 +1,6 @@
 # 얼굴가드 모델 API
 
-딥소각의 AI 추론을 담당하는 독립 FastAPI 서비스입니다. `face-image` 저장소의 안정된 `main` 커밋 `8c72a10`을 기준으로 운영 API 코드와 핵심 테스트만 모노레포에 이관했습니다. 학습 노트북·데이터·실험 보고서는 포함하지 않습니다.
+딥소각의 AI 추론을 담당하는 독립 FastAPI 서비스입니다. `face-image` 저장소의 안정된 `main` 커밋 `8c72a10`과 클라이언트용 후보 API 변경 `3acf590`을 기준으로 운영 API 코드와 핵심 테스트만 모노레포에 이관했습니다. 학습 노트북·데이터·실험 보고서는 포함하지 않습니다.
 
 ## 무엇을 처리하나요?
 
@@ -80,6 +80,14 @@ docker compose up --build
 
 Docker도 호스트의 `127.0.0.1:8001`로만 공개합니다.
 
+공개 키워드 검색까지 함께 실행할 때는 SearXNG 결합 설정을 추가합니다.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.searxng.yml up --build
+```
+
+SearXNG은 등록 사진을 외부로 보내는 얼굴 역검색 서비스가 아닙니다. 사용자가 동의한 이름·활동명 같은 검색어만 받아 공개 이미지 후보를 모으고, 후보가 본인인지와 조작 신호가 있는지는 로컬 ArcFace·ONNX가 후속 분석합니다.
+
 ## 주요 API
 
 | API | 용도 |
@@ -92,8 +100,11 @@ Docker도 호스트의 `127.0.0.1:8001`로만 공개합니다.
 | `POST /v1/exposure-scans` | 공개 후보 URL 분석 시작 |
 | `GET /v1/exposure-scans/{scan_id}` | 분석 진행 상태 확인 |
 | `GET /v1/exposure-scans/{scan_id}/candidates` | 후보별 최종 결과 확인 |
+| `GET /v1/exposure-scans/{scan_id}/client-candidates` | 딥소각 화면용 후보와 검토 행동값 확인 |
 
 기존 `server`가 Google Vision으로 찾은 후보는 `POST /v1/exposure-scans`의 `candidates`에 넣습니다. 브라우저 앱이 모델 API를 직접 호출하지 않고, 기존 서버가 내부에서 호출하는 구조를 사용합니다.
+
+`client-candidates`는 `face_similarity`와 `deepfake_score` 원점수를 확률로 바꾸지 않고 반환합니다. 화면은 `recommended_action`의 `review_required`, `identity_review_required`, `monitor`, `exclude_recommended`, `analysis_unavailable` 값으로 안내 문구를 결정합니다.
 
 ## 테스트
 

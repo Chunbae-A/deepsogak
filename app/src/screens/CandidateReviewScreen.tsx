@@ -19,7 +19,13 @@ const FILTER_LABELS: Record<RiskLevel, string> = {
   'exclude-recommended': '제외',
 };
 
-export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelection: () => void }) {
+export function CandidateReviewScreen({
+  scanId,
+  onConfirmSelection,
+}: {
+  scanId: string;
+  onConfirmSelection: () => void;
+}) {
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +36,7 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
     let cancelled = false;
     setError(null);
     setCandidates(null);
-    fetchCandidates()
+    fetchCandidates(scanId)
       .then((data) => {
         if (!cancelled) setCandidates(data);
       })
@@ -40,7 +46,7 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [scanId]);
 
   useEffect(() => load(), [load]);
 
@@ -117,7 +123,11 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
                   <CandidateRow
                     key={c.id}
                     candidate={c.label}
-                    similarity={c.sourceLabel === '직접 제보' ? '제보 자료 · 검토 대기' : `얼굴 유사도 ${c.similarityPercent}%`}
+                    similarity={
+                      c.faceSimilarity === null
+                        ? '얼굴 유사도 원점수 없음'
+                        : `얼굴 유사도 원점수 ${c.faceSimilarity.toFixed(3)}`
+                    }
                     risk={c.riskLabel}
                     sourceLabel={c.sourceLabel}
                     thumbnailUrl={c.thumbnailUrl}
@@ -130,8 +140,8 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
             </View>
 
             <InfoPanel
-              title="얼굴 유사도는 딥페이크 확률이 아닙니다"
-              body="유사도는 동일 인물 가능성만 나타냅니다. 오탐으로 판단되면 각 후보의 '제외'를 선택하세요."
+              title="두 점수 모두 확률이 아닙니다"
+              body="얼굴 유사도는 본인 후보 선별용, 딥페이크 점수는 조작 의심 신호용 원점수입니다. 원문을 확인한 뒤 오탐이면 '제외'를 선택하세요."
             />
           </ScrollView>
 

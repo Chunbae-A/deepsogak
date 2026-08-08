@@ -83,6 +83,98 @@ class ModelApiAdapterTests(unittest.TestCase):
             {"status": "unavailable", "connected": False},
         )
 
+    @patch("model_api.requests.post")
+    def test_public_monitoring_calls_enrollment_then_scan(self, post: Mock) -> None:
+        post.side_effect = [
+            self._response(
+                {
+                    "enrollment_id": "enrollment-1",
+                    "status": "active",
+                    "reference_count": 1,
+                }
+            ),
+            self._response(
+                {
+                    "scan_id": "scan-1",
+                    "status": "queued",
+                    "status_url": "/v1/exposure-scans/scan-1",
+                    "client_candidates_url": (
+                        "/v1/exposure-scans/scan-1/client-candidates"
+                    ),
+                }
+            ),
+        ]
+
+        enrollment = model_api.create_face_enrollment(
+            [(b"reference", "image/jpeg")]
+        )
+        scan = model_api.start_exposure_scan(
+            enrollment["enrollment_id"],
+            query_text="동의받은 공개 검색어",
+            maximum_results=5,
+            idempotency_key="monitoring-demo-key",
+        )
+
+        self.assertEqual(scan["scan_id"], "scan-1")
+        enrollment_call = post.call_args_list[0]
+        self.assertEqual(
+            enrollment_call.kwargs["files"][0][0], "reference_images"
+        )
+        scan_call = post.call_args_list[1]
+        self.assertEqual(scan_call.kwargs["json"]["privacy_mode"], "web_monitoring")
+        self.assertTrue(scan_call.kwargs["json"]["web_monitoring_consent"])
+        self.assertEqual(
+            scan_call.kwargs["headers"]["Idempotency-Key"],
+            "monitoring-demo-key",
+        )
+
+    @patch("model_api.requests.get")
+    def test_public_monitoring_fetches_status_and_client_candidates(
+        self, get: Mock
+    ) -> None:
+        get.side_effect = [
+            self._response(
+                {
+                    "scan_id": "scan-1",
+                    "status": "completed",
+                    "progress_percent": 100,
+                    "progress": {"identity_match_count": 1},
+                }
+            ),
+            self._response(
+                {
+                    "scan_id": "scan-1",
+                    "status": "completed",
+                    "candidate_count": 1,
+                    "candidates": [
+                        {
+                            "candidate_id": "candidate-1",
+                            "recommended_action": "review_required",
+                        }
+                    ],
+                }
+            ),
+        ]
+
+        status = model_api.get_exposure_scan("scan-1")
+        candidates = model_api.get_client_exposure_candidates("scan-1")
+
+        self.assertEqual(status["progress_percent"], 100)
+        self.assertEqual(
+            candidates["candidates"][0]["recommended_action"],
+            "review_required",
+        )
+
+    @patch("model_api.requests.post", side_effect=requests.ConnectionError())
+    def test_public_monitoring_connection_error_is_stable(self, _post: Mock) -> None:
+        with self.assertRaises(model_api.ModelApiError) as raised:
+            model_api.create_face_enrollment([(b"reference", "image/jpeg")])
+
+        self.assertEqual(
+            raised.exception.code, "MODEL_API_ENROLLMENT_REQUEST_FAILED"
+        )
+        self.assertTrue(raised.exception.unavailable)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -24,6 +24,7 @@ export default function App() {
   const [flowStep, setFlowStep] = useState<MonitoringFlowStep>('monitoring');
   const [protectionStep, setProtectionStep] = useState<ProtectionFlowStep>('upload');
   const [protectionJobId, setProtectionJobId] = useState<string | null>(null);
+  const [monitoringScanId, setMonitoringScanId] = useState<string | null>(null);
   const [reportStep, setReportStep] = useState<ReportFlowStep>('draft');
 
   const handleSelectTab = (next: TabKey) => {
@@ -63,10 +64,16 @@ export default function App() {
             />
           )}
           {tab === 'Monitoring' && flowStep === 'monitoring' && (
-            <MonitoringScreen onConfirmCandidates={() => setFlowStep('candidates')} />
+            <MonitoringScreen
+              referenceJobId={protectionJobId}
+              onConfirmCandidates={(scanId) => {
+                setMonitoringScanId(scanId);
+                setFlowStep('candidates');
+              }}
+            />
           )}
-          {tab === 'Monitoring' && flowStep === 'candidates' && (
-            <CandidateReviewScreen onConfirmSelection={() => setTab('Report')} />
+          {tab === 'Monitoring' && flowStep === 'candidates' && monitoringScanId && (
+            <CandidateReviewScreen scanId={monitoringScanId} onConfirmSelection={() => setTab('Report')} />
           )}
           {tab === 'Report' && reportStep === 'draft' && (
             <IncidentReportScreen onConfirmConsent={() => setReportStep('ready')} />

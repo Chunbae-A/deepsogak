@@ -1,10 +1,5 @@
 import { API_BASE_URL } from '../config';
 
-// server/main.py의 /api/monitoring/summary가 응답을 만든다. 실제 얼굴 임베딩(ArcFace)
-// 순찰(SerpApi + Google Cloud Vision) 모델·키가 아직 없어 서버도 고정된 시뮬레이션
-// 데이터를 반환한다 — 이 함수는 그 서버를 호출하는 지점이고, 진짜 모델이 붙으면
-// server/main.py의 get_monitoring_summary 내부만 교체하면 된다.
-
 export type MonitoringSource = {
   label: string;
   count: string;
@@ -16,13 +11,88 @@ export type MonitoringSummary = {
   sources: MonitoringSource[];
 };
 
-export async function fetchMonitoringSummary(): Promise<MonitoringSummary> {
-  const res = await fetch(`${API_BASE_URL}/api/monitoring/summary`);
-  if (!res.ok) throw new Error('모니터링 결과를 불러오지 못했습니다.');
+export type MonitoringScanStatusValue =
+  | 'queued'
+  | 'searching'
+  | 'identity_filtering'
+  | 'deepfake_analyzing'
+  | 'completed'
+  | 'partial_failed'
+  | 'failed';
+
+export type MonitoringScanCreated = {
+  scanId: string;
+  status: MonitoringScanStatusValue;
+  statusUrl: string;
+  candidatesUrl: string;
+  referenceCount: number;
+  recommendedReferenceCount: number;
+  warning: string;
+};
+
+export type MonitoringScanStatus = {
+  scanId: string;
+  status: MonitoringScanStatusValue;
+  progressPercent: number;
+  searchedCandidateCount: number;
+  analyzedCandidateCount: number;
+  identityMatchCount: number;
+  deepfakeCompletedCount: number;
+  errorCode: string | null;
+  warning: string;
+};
+
+async function errorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = await res.json();
+    const detail = body?.detail;
+    if (typeof detail === 'string') return detail;
+    if (typeof detail?.message === 'string') return detail.message;
+  } catch {
+    // JSON 오류 본문이 아니면 사용자용 기본 문구를 사용한다.
+  }
+  return fallback;
+}
+
+export async function startMonitoringScan(input: {
+  queryText: string;
+  webMonitoringConsent: boolean;
+  referenceJobIds: string[];
+  maximumResults?: number;
+}): Promise<MonitoringScanCreated> {
+  const res = await fetch(`${API_BASE_URL}/api/monitoring/scans`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...input,
+      maximumResults: input.maximumResults ?? 5,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, '공개 노출 확인을 시작하지 못했습니다.'));
+  }
   return res.json();
 }
 
-// 자동 탐색 밖(비공개 계정 등)의 URL·캡처를 사용자가 직접 제보해 분석 후보에 포함시킨다.
+export async function fetchMonitoringScanStatus(scanId: string): Promise<MonitoringScanStatus> {
+  const res = await fetch(`${API_BASE_URL}/api/monitoring/scans/${encodeURIComponent(scanId)}`);
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, '모니터링 진행 상태를 불러오지 못했습니다.'));
+  }
+  return res.json();
+}
+
+export async function fetchMonitoringSummary(scanId: string): Promise<MonitoringSummary> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/monitoring/scans/${encodeURIComponent(scanId)}/summary`,
+  );
+  if (!res.ok) {
+    throw new Error(await errorMessage(res, '모니터링 결과를 불러오지 못했습니다.'));
+  }
+  return res.json();
+}
+
+// 자동 탐색 밖(비공개 계정 등)의 URL을 사용자가 직접 제보해 검토 후보에 포함시킨다.
 export async function submitManualReport(url: string): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/api/monitoring/report`, {
     method: 'POST',
