@@ -1,7 +1,8 @@
-fastapi
-uvicorn[standard]
-python-multipart
-pillow
-imagehash
-requests
-python-dotenv
+fastapi==0.128.8
+uvicorn[standard]==0.52.1
+python-multipart==0.0.20
+pillow==12.3.0
+imagehash==4.3.2
+requests==2.34.2
+python-dotenv==1.2.2
+httpx==0.28.1

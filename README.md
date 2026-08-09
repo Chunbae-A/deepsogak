@@ -80,3 +80,22 @@ EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:8000 npm run web
 | `GET /api/monitoring/scans/{scan_id}/candidates` | 프론트용 얼굴·딥페이크 원점수와 검토 행동값 확인 |
 
 현재 작업과 결과는 메모리에만 저장되므로 서버를 재시작하면 사라집니다. 공개 영상 후보 자동 수집, 영구 작업 큐, 운영 기준값 승인은 다음 단계입니다.
+
+## 한 명령으로 데모 실행
+
+모델 `.env`의 라이선스 동의와 `services/faceguard-model-api/.models/deepfake/efficientnet_b4.onnx` 준비가 끝났다면 저장소 루트에서 다음 명령 하나만 실행합니다.
+
+```bash
+./scripts/demo.sh start
+```
+
+스크립트가 모델 API·SearXNG·딥소각 서버·Expo 웹을 순서대로 실행하고 [http://127.0.0.1:8082](http://127.0.0.1:8082)를 엽니다. 실행한 터미널은 데모가 끝날 때까지 열어 두고, 종료할 때 `Ctrl+C`를 누르면 전체 서비스가 함께 안전하게 종료됩니다. 처음 실행할 때만 서버 가상환경과 프론트 라이브러리를 자동으로 설치하므로 시간이 조금 더 걸릴 수 있습니다.
+
+```bash
+./scripts/demo.sh status   # 실행 상태와 주소 확인
+./scripts/demo.sh logs     # 최근 오류 로그 확인
+./scripts/demo.sh restart  # 전체 재시작
+./scripts/demo.sh stop     # 전체 종료
+```
+
+모델 라이선스 동의나 ONNX 파일이 준비되지 않았다면 임의로 넘어가지 않고 필요한 조치를 한국어로 안내한 뒤 중단합니다. `stop`은 컨테이너와 프로세스만 종료하며 다운로드한 모델 볼륨은 삭제하지 않습니다.
