@@ -31,6 +31,12 @@ class MonitoringFlowHttpTests(unittest.TestCase):
         self.client.close()
         self.temp_dir.cleanup()
 
+    def test_missing_score_message_is_natural_korean(self) -> None:
+        self.assertEqual(
+            main._score_signal("딥페이크 모델 원점수", None),
+            "딥페이크 모델 원점수를 계산하지 못함",
+        )
+
     @patch("main.model_api.start_exposure_scan")
     @patch("main.model_api.create_face_enrollment")
     def test_start_scan_uses_uploaded_photo_and_explicit_consent(

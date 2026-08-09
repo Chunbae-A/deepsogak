@@ -232,7 +232,7 @@ def _candidate_risk(candidate: dict) -> tuple[str, str]:
 def _score_signal(label: str, value: object) -> str:
     if isinstance(value, (int, float)):
         return f"{label} {float(value):.3f} (확률 아님)"
-    return f"{label}을 계산하지 못함"
+    return f"{label}를 계산하지 못함"
 
 
 def _client_candidate(candidate: dict, index: int) -> dict:
