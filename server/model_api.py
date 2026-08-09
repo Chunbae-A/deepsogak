@@ -17,9 +17,16 @@ RESEARCH_WARNING = (
 class ModelApiError(RuntimeError):
     """모델 API 장애를 프론트에 민감정보 없이 전달하기 위한 안정된 오류."""
 
-    def __init__(self, code: str, *, unavailable: bool = False) -> None:
+    def __init__(
+        self,
+        code: str,
+        *,
+        message: str | None = None,
+        unavailable: bool = False,
+    ) -> None:
         super().__init__(code)
         self.code = code
+        self.message = message
         self.unavailable = unavailable
 
 
@@ -43,7 +50,19 @@ def _response_json(response: requests.Response, *, operation: str) -> dict[str, 
         response.raise_for_status()
     except requests.HTTPError as error:
         status_code = error.response.status_code if error.response is not None else 500
-        raise ModelApiError(f"{operation}_HTTP_{status_code}") from error
+        error_code = f"{operation}_HTTP_{status_code}"
+        error_message = None
+        try:
+            error_payload = response.json()
+            model_error = error_payload.get("error")
+            if isinstance(model_error, dict):
+                if isinstance(model_error.get("code"), str):
+                    error_code = model_error["code"]
+                if isinstance(model_error.get("message"), str):
+                    error_message = model_error["message"]
+        except (AttributeError, TypeError, ValueError):
+            pass
+        raise ModelApiError(error_code, message=error_message) from error
     try:
         payload = response.json()
     except (TypeError, ValueError) as error:

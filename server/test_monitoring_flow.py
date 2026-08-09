@@ -187,6 +187,32 @@ class MonitoringFlowHttpTests(unittest.TestCase):
             "MODEL_API_ENROLLMENT_REQUEST_FAILED",
         )
 
+    @patch(
+        "main.model_api.create_face_enrollment",
+        side_effect=model_api.ModelApiError(
+            "MULTIPLE_FACES",
+            message="사진에는 한 사람의 얼굴만 있어야 합니다.",
+        ),
+    )
+    def test_model_validation_message_is_shown_to_client(
+        self, _create_enrollment
+    ) -> None:
+        response = self.client.post(
+            "/api/monitoring/scans",
+            json={
+                "queryText": "공개 검색어",
+                "webMonitoringConsent": True,
+                "referenceJobIds": ["job-1"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "MULTIPLE_FACES")
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "사진에는 한 사람의 얼굴만 있어야 합니다.",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

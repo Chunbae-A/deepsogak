@@ -175,6 +175,30 @@ class ModelApiAdapterTests(unittest.TestCase):
         )
         self.assertTrue(raised.exception.unavailable)
 
+    @patch("model_api.requests.post")
+    def test_public_monitoring_keeps_safe_model_validation_message(
+        self, post: Mock
+    ) -> None:
+        response = Mock()
+        response.status_code = 422
+        response.json.return_value = {
+            "error": {
+                "code": "MULTIPLE_FACES",
+                "message": "사진에는 한 사람의 얼굴만 있어야 합니다.",
+            }
+        }
+        response.raise_for_status.side_effect = requests.HTTPError(response=response)
+        post.return_value = response
+
+        with self.assertRaises(model_api.ModelApiError) as raised:
+            model_api.create_face_enrollment([(b"reference", "image/jpeg")])
+
+        self.assertEqual(raised.exception.code, "MULTIPLE_FACES")
+        self.assertEqual(
+            raised.exception.message,
+            "사진에는 한 사람의 얼굴만 있어야 합니다.",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

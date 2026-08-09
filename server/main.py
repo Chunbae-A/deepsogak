@@ -196,15 +196,16 @@ class StartMonitoringScanBody(BaseModel):
 
 def _raise_model_api_http(error: model_api.ModelApiError) -> None:
     status_code = 503 if error.unavailable else 502
+    fallback_message = (
+        "얼굴가드 모델 API에 연결할 수 없습니다."
+        if error.unavailable
+        else "얼굴가드 모델 API가 요청을 처리하지 못했습니다."
+    )
     raise HTTPException(
         status_code=status_code,
         detail={
             "code": error.code,
-            "message": (
-                "얼굴가드 모델 API에 연결할 수 없습니다."
-                if error.unavailable
-                else "얼굴가드 모델 API가 요청을 처리하지 못했습니다."
-            ),
+            "message": error.message or fallback_message,
         },
     )
 
