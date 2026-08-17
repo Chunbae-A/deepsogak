@@ -135,6 +135,9 @@ async def process_protection(photo: UploadFile, background_tasks: BackgroundTask
     except OSError:
         raise HTTPException(status_code=500, detail="이미지 처리 중 오류가 발생했습니다.")
 
+    # TODO(#77): 클라이언트 식별자를 받게 되면 owner_id=<식별자>를 넘겨서
+    # get_latest_completed_job(owner_id=...)로 사용자별로 좁힐 수 있다.
+    # 지금은 owner_id를 안 넘겨(None) 기존 단일 사용자 동작을 그대로 둔다.
     db.create_pending_job(job_id, original_path=original_path, created_at=time.time())
     background_tasks.add_task(_run_protection_job, job_id, raw, image.format, original_path, protected_path)
 

@@ -63,6 +63,47 @@ class DbTestCase(unittest.TestCase):
     def test_get_latest_completed_job_empty_returns_none(self):
         self.assertIsNone(db.get_latest_completed_job())
 
+    def test_owner_id_defaults_to_none_and_round_trips(self):
+        # #77 스캐폴딩: owner_id를 안 넘기면 기존과 동일하게 NULL로 저장된다.
+        db.create_job(
+            "no-owner", original_path=Path("a"), protected_path=Path("a"),
+            sha256="a", phash="a", created_at=1.0,
+        )
+        self.assertIsNone(db.get_job("no-owner")["ownerId"])
+
+        db.create_job(
+            "with-owner", original_path=Path("b"), protected_path=Path("b"),
+            sha256="b", phash="b", created_at=2.0, owner_id="user-1",
+        )
+        self.assertEqual(db.get_job("with-owner")["ownerId"], "user-1")
+
+    def test_get_latest_completed_job_without_owner_filter_ignores_owner_id(self):
+        # owner_id를 안 넘기면(기본값 None) 지금까지처럼 owner_id와 무관하게
+        # DB 전체에서 가장 최근 job을 돌려준다 — 기존 단일 사용자 동작을
+        # 그대로 유지한다는 게 이 테스트의 핵심.
+        db.create_job(
+            "user-a-job", original_path=Path("a"), protected_path=Path("a"),
+            sha256="a", phash="a", created_at=100.0, owner_id="user-a",
+        )
+        db.create_job(
+            "user-b-job", original_path=Path("b"), protected_path=Path("b"),
+            sha256="b", phash="b", created_at=200.0, owner_id="user-b",
+        )
+        latest = db.get_latest_completed_job()
+        self.assertEqual(latest[0], "user-b-job")
+
+    def test_get_latest_completed_job_with_owner_filter_scopes_to_that_owner(self):
+        db.create_job(
+            "user-a-job", original_path=Path("a"), protected_path=Path("a"),
+            sha256="a", phash="a", created_at=100.0, owner_id="user-a",
+        )
+        db.create_job(
+            "user-b-job", original_path=Path("b"), protected_path=Path("b"),
+            sha256="b", phash="b", created_at=200.0, owner_id="user-b",
+        )
+        latest = db.get_latest_completed_job(owner_id="user-a")
+        self.assertEqual(latest[0], "user-a-job")
+
     def test_count_completed_jobs(self):
         self.assertEqual(db.count_completed_jobs(), 0)
         db.create_job("a", original_path=Path("a"), protected_path=Path("a"), sha256="a", phash="a", created_at=1.0)
