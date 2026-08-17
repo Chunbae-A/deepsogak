@@ -74,6 +74,11 @@ def _require_path() -> Path:
 def _connect() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(_require_path())
     conn.row_factory = sqlite3.Row
+    # WAL(Write-Ahead Logging)은 쓰기 하나가 읽기 전체를 막는 SQLite 기본 동작을
+    # 완화해, 팀원 여러 명이 동시에 서버를 두드려도 잠금 경합이 덜 생기게 한다.
+    # busy_timeout은 그래도 잠깐 잠기는 순간에 바로 실패하지 않고 잠시 재시도하게 한다.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     try:
         yield conn
         conn.commit()
@@ -255,9 +260,22 @@ def get_report_count() -> int:
 
 
 def increment_report_count() -> int:
-    count = get_report_count() + 1
-    _set_state(_REPORT_COUNT_KEY, str(count))
-    return count
+    # 읽고 나서 1 더해 다시 쓰는 방식(get_report_count() + 1)은 동시에 두 요청이
+    # 들어오면 하나의 증가분을 잃어버릴 수 있다(lost update). INSERT ... ON
+    # CONFLICT ... DO UPDATE 한 문장으로 증가를 SQLite 트랜잭션 안에서 원자적으로
+    # 처리해 이 경합을 없앤다.
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_state (key, value) VALUES (?, '1')
+            ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1
+            """,
+            (_REPORT_COUNT_KEY,),
+        )
+        row = conn.execute(
+            "SELECT value FROM app_state WHERE key = ?", (_REPORT_COUNT_KEY,)
+        ).fetchone()
+    return int(row["value"])
 
 
 def reset_all() -> None:

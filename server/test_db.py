@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -129,6 +130,59 @@ class DbTestCase(unittest.TestCase):
         self.assertEqual(db.list_manual_reports(), [])
         self.assertEqual(db.get_confirmed_keep_ids(), [])
         self.assertEqual(db.get_report_count(), 0)
+
+    def test_concurrent_increment_report_count_has_no_lost_updates(self):
+        """여러 스레드가 동시에 신고 동의를 눌러도 카운트가 씹히면 안 된다.
+
+        WAL 모드가 'database is locked' 실패를 막고, increment_report_count의
+        원자적 UPSERT가 읽고-쓰는 사이의 경합(lost update)을 막는지 함께 검증한다.
+        """
+        thread_count = 8
+        increments_per_thread = 15
+        errors: list[BaseException] = []
+
+        def worker() -> None:
+            try:
+                for _ in range(increments_per_thread):
+                    db.increment_report_count()
+            except BaseException as exc:  # noqa: BLE001 - 스레드 예외를 메인에서 확인하려고 수집
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(thread_count)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(db.get_report_count(), thread_count * increments_per_thread)
+
+    def test_concurrent_job_creation_has_no_locking_errors(self):
+        """여러 스레드가 동시에 보호사진을 처리해도 쓰기 잠금 오류가 나면 안 된다."""
+        thread_count = 8
+        errors: list[BaseException] = []
+
+        def worker(index: int) -> None:
+            try:
+                db.create_job(
+                    f"job-{index}",
+                    original_path=Path(f"a{index}"),
+                    protected_path=Path(f"b{index}"),
+                    sha256=f"sha{index}",
+                    phash=f"phash{index}",
+                    created_at=float(index),
+                )
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(thread_count)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(db.count_jobs(), thread_count)
 
 
 if __name__ == "__main__":
