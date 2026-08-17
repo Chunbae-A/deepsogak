@@ -40,21 +40,26 @@ def _make_landmark(size: int) -> np.ndarray:
 
 
 def _fake_get_feat(aligned_bgr: np.ndarray) -> np.ndarray:
-    """정렬된 크롭을 4x4 블록별 채널 평균으로 쪼갠 "임베딩"을 내는 가짜 인식 모델.
+    """정렬된 크롭을 4x4 블록별 채널 평균(전체 평균 제거)으로 쪼갠 가짜 임베딩.
 
-    전체 평균 하나만 쓰면 코사인 유사도가 방향이 아니라 크기 변화에 거의
-    영향을 안 받아 둔감해진다. 블록별로 나누면 이미지의 어느 부분이
-    바뀌었는지가 벡터의 "방향"에 반영돼, 실제 ArcFace처럼 노이즈가 임베딩
-    방향을 실제로 움직이는 성질을 재현한다.
+    블록 평균을 그대로 쓰면 모든 값이 배경 밝기(~100~160)라는 큰 공통
+    성분에 묻혀서, 아주 작은 지역적 변화는 코사인 유사도를 거의 못 움직인다
+    (실측: epsilon=8짜리 노이즈로도 유사도가 0.9999999 언저리에서 안 움직임).
+    전체 평균을 빼서 "이 블록이 전체 평균보다 얼마나 밝은가"라는 상대값만
+    남기면, 지역적 변화가 벡터의 방향에 훨씬 잘 반영된다(실측: 같은 노이즈로
+    유사도가 0.99 근처까지 움직임). 실제 ArcFace도 절대 밝기가 아니라
+    상대적인 지역 패턴에 반응하도록 학습돼 있어, 이 쪽이 더 현실적인 가짜
+    모델이다.
     """
     h, w = aligned_bgr.shape[:2]
     grid = 4
     cell_h, cell_w = max(1, h // grid), max(1, w // grid)
+    global_mean = aligned_bgr.astype(np.float64).mean(axis=(0, 1))
     values = []
     for r in range(grid):
         for c in range(grid):
             cell = aligned_bgr[r * cell_h:(r + 1) * cell_h, c * cell_w:(c + 1) * cell_w, :]
-            values.extend(cell.astype(np.float64).mean(axis=(0, 1)))
+            values.extend(cell.astype(np.float64).mean(axis=(0, 1)) - global_mean)
     return np.array(values)
 
 
@@ -123,7 +128,7 @@ class ApplyDeepbaeksinTestCase(unittest.TestCase):
                 image,
                 epsilon=8,
                 max_iterations=60,
-                grid_size=6,
+                block_size=24,
                 ssim_floor=0.97,
                 time_budget_seconds=30.0,
                 seed=1,
@@ -152,11 +157,27 @@ class ApplyDeepbaeksinTestCase(unittest.TestCase):
 
         with patch.object(deepbaeksin, "_get_face_app", return_value=fake_app):
             protected, meta = deepbaeksin.apply_deepbaeksin(
-                image, epsilon=0, max_iterations=20, grid_size=4, time_budget_seconds=10.0
+                image, epsilon=0, max_iterations=20, time_budget_seconds=10.0
             )
 
         self.assertFalse(meta["applied"])
         self.assertTrue(np.array_equal(np.asarray(protected), np.asarray(image.convert("RGB"))))
+
+    def test_meta_reports_jpeg_round_trip_similarity(self):
+        size = 96
+        fake_app = _FakeFaceApp(has_face=True, image_size=size)
+        rng = np.random.default_rng(3)
+        noise = rng.integers(100, 160, size=(size, size, 3), dtype=np.uint8)
+        image = Image.fromarray(noise, mode="RGB")
+
+        with patch.object(deepbaeksin, "_get_face_app", return_value=fake_app):
+            _, meta = deepbaeksin.apply_deepbaeksin(
+                image, max_iterations=80, time_budget_seconds=30.0, seed=2, jpeg_quality_check=80
+            )
+
+        self.assertEqual(meta["jpegQualityChecked"], 80)
+        self.assertIsNotNone(meta["similarityAfterJpegRoundTrip"])
+        self.assertLessEqual(meta["similarityAfterJpegRoundTrip"], 1.0)
 
 
 class WarmUpTestCase(unittest.TestCase):
