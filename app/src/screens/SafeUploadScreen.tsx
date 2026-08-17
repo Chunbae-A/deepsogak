@@ -7,6 +7,7 @@ import { PrimaryButton } from '../components/Button';
 import { ProtectingScreen } from './ProtectingScreen';
 import { colors, radii, spacing, typography } from '../theme';
 import { SelectedPhoto, pickPhoto, startProtection } from '../services/safeUploadApi';
+import { pollProtectionResult } from '../services/protectionResultApi';
 
 const uploadIcon = require('../../assets/icons/icon-upload.png');
 
@@ -38,6 +39,8 @@ export function SafeUploadScreen({ onCreateProtectedPhoto }: { onCreateProtected
     setUploadError(null);
     try {
       const jobId = await startProtection(photo);
+      // 딥백신 등 백그라운드 처리가 끝날 때까지 이 화면(ProtectingScreen)에 머문다.
+      await pollProtectionResult(jobId);
       onCreateProtectedPhoto(jobId);
     } catch {
       setUploadError('업로드에 실패했습니다. 다시 시도해 주세요.');

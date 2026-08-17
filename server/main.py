@@ -9,7 +9,7 @@ from pathlib import Path
 
 import imagehash
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
@@ -61,8 +61,42 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=STORAGE_DIR), name="static")
 
 
+def _run_protection_job(job_id: str, raw: bytes, image_format: str, original_path: Path, protected_path: Path) -> None:
+    # BackgroundTasks가 스레드풀에서 돌리는 동기 함수: 딥백신(최대 12초x모델수)이
+    # 이벤트 루프를 막지 않게 하려고 /api/protection/process에서 분리했다.
+    try:
+        image = Image.open(io.BytesIO(raw))
+        image.load()
+
+        # EXIF·GPS 메타데이터 제거: 픽셀 데이터만 가진 새 이미지에 다시 담아 저장한다.
+        clean_image = Image.new(image.mode, image.size)
+        clean_image.putdata(list(image.getdata()))
+
+        # 딥백신: ArcFace 임베딩을 타깃으로 한 적대적 노이즈 적용을 시도한다.
+        # 얼굴이 없거나 모델을 쓸 수 없으면 예외 없이 원본(EXIF만 제거된 상태)을
+        # 그대로 돌려주고, 그 사실을 deepbaeksin_meta에 정직하게 남긴다.
+        protected_image, deepbaeksin_meta = deepbaeksin.apply_deepbaeksin(clean_image)
+        protected_image.save(protected_path, format=image_format)
+
+        protected_bytes = protected_path.read_bytes()
+        sha256 = hashlib.sha256(protected_bytes).hexdigest()
+        phash = str(imagehash.phash(protected_image))
+
+        db.complete_job(
+            job_id,
+            protected_path=protected_path,
+            sha256=sha256,
+            phash=phash,
+            deepbaeksin_applied=deepbaeksin_meta["applied"],
+            deepbaeksin_meta=deepbaeksin_meta,
+        )
+    except Exception:
+        logger.exception("보호사진 처리 실패 (jobId=%s)", job_id)
+        db.fail_job(job_id, reason="이미지 처리 중 오류가 발생했습니다.")
+
+
 @app.post("/api/protection/process")
-async def process_protection(photo: UploadFile):
+async def process_protection(photo: UploadFile, background_tasks: BackgroundTasks):
     raw = await photo.read()
     if not raw:
         raise HTTPException(status_code=400, detail="빈 파일은 업로드할 수 없습니다.")
@@ -86,33 +120,11 @@ async def process_protection(photo: UploadFile):
 
     try:
         original_path.write_bytes(raw)
-
-        # EXIF·GPS 메타데이터 제거: 픽셀 데이터만 가진 새 이미지에 다시 담아 저장한다.
-        clean_image = Image.new(image.mode, image.size)
-        clean_image.putdata(list(image.getdata()))
-
-        # 딥백신: ArcFace 임베딩을 타깃으로 한 적대적 노이즈 적용을 시도한다.
-        # 얼굴이 없거나 모델을 쓸 수 없으면 예외 없이 원본(EXIF만 제거된 상태)을
-        # 그대로 돌려주고, 그 사실을 deepbaeksin_meta에 정직하게 남긴다.
-        protected_image, deepbaeksin_meta = deepbaeksin.apply_deepbaeksin(clean_image)
-        protected_image.save(protected_path, format=image.format)
     except OSError:
         raise HTTPException(status_code=500, detail="이미지 처리 중 오류가 발생했습니다.")
 
-    protected_bytes = protected_path.read_bytes()
-    sha256 = hashlib.sha256(protected_bytes).hexdigest()
-    phash = str(imagehash.phash(protected_image))
-
-    db.create_job(
-        job_id,
-        original_path=original_path,
-        protected_path=protected_path,
-        sha256=sha256,
-        phash=phash,
-        created_at=time.time(),
-        deepbaeksin_applied=deepbaeksin_meta["applied"],
-        deepbaeksin_meta=deepbaeksin_meta,
-    )
+    db.create_pending_job(job_id, original_path=original_path, created_at=time.time())
+    background_tasks.add_task(_run_protection_job, job_id, raw, image.format, original_path, protected_path)
 
     return {"jobId": job_id}
 
@@ -141,9 +153,15 @@ def get_protection_result(jobId: str):
     if not job:
         raise HTTPException(status_code=404, detail="처리 결과를 찾을 수 없습니다.")
 
+    if job["status"] == "processing":
+        return {"status": "processing"}
+    if job["status"] == "failed":
+        return {"status": "failed", "errorReason": job["errorReason"]}
+
     deepbaeksin_meta = job["deepbaeksinMeta"] or {"reason": None}
 
     return {
+        "status": "completed",
         "originalLabel": "원본 사진",
         "protectedLabel": "보호본",
         "originalPhotoUrl": f"/static/uploads/{job['originalPath'].name}",
@@ -165,6 +183,8 @@ def save_protection(jobId: str):
     job = db.get_job(jobId)
     if not job:
         raise HTTPException(status_code=404, detail="처리 결과를 찾을 수 없습니다.")
+    if job["status"] != "completed":
+        raise HTTPException(status_code=409, detail="아직 처리 중이거나 실패한 작업입니다.")
     saved_path = SAVED_DIR / job["protectedPath"].name
     try:
         saved_path.write_bytes(job["protectedPath"].read_bytes())
@@ -181,7 +201,7 @@ def save_protection(jobId: str):
 # ---------------------------------------------------------------------------
 
 def _get_active_matches() -> list[dict] | None:
-    latest = db.get_latest_job()
+    latest = db.get_latest_completed_job()
     if latest is None:
         return None
     latest_job_id, job = latest
@@ -481,7 +501,7 @@ def get_report_package():
 def get_home_summary():
     monitoring = get_monitoring_summary()
     return {
-        "protectedCount": db.count_jobs(),
+        "protectedCount": db.count_completed_jobs(),
         "candidateCount": monitoring["totalCandidates"],
         "reportCount": db.get_report_count(),
         "lastCheckedAt": monitoring["lastCheckedAt"],

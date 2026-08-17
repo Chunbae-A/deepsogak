@@ -97,6 +97,28 @@ export function ProtectionResultScreen({
               ))}
             </View>
 
+            {result.deepbaeksin.applied && (
+              <View style={styles.resultsCard}>
+                <Text style={styles.resultsTitle}>딥백신 실측 지표</Text>
+                {result.deepbaeksin.endToEndSimilarityAfter != null && (
+                  <Text style={styles.metricRow}>
+                    얼굴 임베딩 유사도: {(result.deepbaeksin.endToEndSimilarityAfter * 100).toFixed(1)}%
+                  </Text>
+                )}
+                {result.deepbaeksin.similarityAfterJpegRoundTrip != null && (
+                  <Text style={styles.metricRow}>
+                    JPEG 재압축(q{result.deepbaeksin.jpegQualityChecked}) 후 유사도:{' '}
+                    {(result.deepbaeksin.similarityAfterJpegRoundTrip * 100).toFixed(1)}%
+                  </Text>
+                )}
+                {result.deepbaeksin.ssim != null && (
+                  <Text style={styles.metricRow}>화질 보존도(SSIM): {result.deepbaeksin.ssim.toFixed(3)}</Text>
+                )}
+                <Text style={styles.metricRow}>사용된 모델: {result.deepbaeksin.usedModels.join(', ')}</Text>
+                <Text style={styles.metricRow}>처리 시간: {result.deepbaeksin.elapsedSeconds.toFixed(1)}초</Text>
+              </View>
+            )}
+
             <InfoPanel
               title="중요한 한계"
               body="딥페이크 생성을 100% 차단하지는 않습니다. 게시 후 공개 노출 모니터링을 함께 사용하세요."
@@ -159,6 +181,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   resultsTitle: { ...typography.bodyStrong, color: colors.text900 },
+  metricRow: { ...typography.caption, color: colors.text700 },
   bottomCta: { width: '100%', paddingBottom: spacing.lg, gap: spacing.sm },
   saveError: { ...typography.caption, color: colors.amber600, textAlign: 'center' },
   saveSuccess: { ...typography.caption, color: colors.green600, textAlign: 'center' },

@@ -45,7 +45,7 @@ class DbTestCase(unittest.TestCase):
     def test_get_job_missing_returns_none(self):
         self.assertIsNone(db.get_job("does-not-exist"))
 
-    def test_get_latest_job_returns_most_recent_by_created_at(self):
+    def test_get_latest_completed_job_returns_most_recent_by_created_at(self):
         db.create_job(
             "older", original_path=Path("a"), protected_path=Path("a"),
             sha256="a", phash="a", created_at=100.0,
@@ -54,20 +54,20 @@ class DbTestCase(unittest.TestCase):
             "newer", original_path=Path("b"), protected_path=Path("b"),
             sha256="b", phash="b", created_at=200.0,
         )
-        latest = db.get_latest_job()
+        latest = db.get_latest_completed_job()
         self.assertIsNotNone(latest)
         job_id, job = latest
         self.assertEqual(job_id, "newer")
         self.assertEqual(job["sha256"], "b")
 
-    def test_get_latest_job_empty_returns_none(self):
-        self.assertIsNone(db.get_latest_job())
+    def test_get_latest_completed_job_empty_returns_none(self):
+        self.assertIsNone(db.get_latest_completed_job())
 
-    def test_count_jobs(self):
-        self.assertEqual(db.count_jobs(), 0)
+    def test_count_completed_jobs(self):
+        self.assertEqual(db.count_completed_jobs(), 0)
         db.create_job("a", original_path=Path("a"), protected_path=Path("a"), sha256="a", phash="a", created_at=1.0)
         db.create_job("b", original_path=Path("b"), protected_path=Path("b"), sha256="b", phash="b", created_at=2.0)
-        self.assertEqual(db.count_jobs(), 2)
+        self.assertEqual(db.count_completed_jobs(), 2)
 
     def test_manual_reports_preserve_insertion_order(self):
         db.add_manual_report("https://example.com/1", created_at=1.0)
@@ -126,7 +126,7 @@ class DbTestCase(unittest.TestCase):
 
         db.reset_all()
 
-        self.assertEqual(db.count_jobs(), 0)
+        self.assertEqual(db.count_completed_jobs(), 0)
         self.assertEqual(db.list_manual_reports(), [])
         self.assertEqual(db.get_confirmed_keep_ids(), [])
         self.assertEqual(db.get_report_count(), 0)
@@ -182,7 +182,7 @@ class DbTestCase(unittest.TestCase):
             t.join(timeout=30)
 
         self.assertEqual(errors, [])
-        self.assertEqual(db.count_jobs(), thread_count)
+        self.assertEqual(db.count_completed_jobs(), thread_count)
 
 
 if __name__ == "__main__":
