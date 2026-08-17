@@ -29,12 +29,14 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,
     original_path TEXT NOT NULL,
-    protected_path TEXT NOT NULL,
-    sha256 TEXT NOT NULL,
-    phash TEXT NOT NULL,
+    protected_path TEXT,
+    sha256 TEXT,
+    phash TEXT,
     created_at REAL NOT NULL,
     deepbaeksin_applied INTEGER NOT NULL DEFAULT 0,
-    deepbaeksin_meta TEXT
+    deepbaeksin_meta TEXT,
+    status TEXT NOT NULL DEFAULT 'completed',
+    error_reason TEXT
 );
 
 CREATE TABLE IF NOT EXISTS manual_reports (
@@ -62,6 +64,21 @@ def init_db(db_path: Path) -> None:
     _DB_PATH = db_path
     with _connect() as conn:
         conn.executescript(_SCHEMA)
+        _migrate_add_columns(conn)
+
+
+def _migrate_add_columns(conn: sqlite3.Connection) -> None:
+    """비동기 처리(status/error_reason 컬럼)를 추가하기 전에 만들어진 DB 파일도
+    계속 쓸 수 있도록, 없는 컬럼만 추가한다. protected_path/sha256/phash의
+    NOT NULL 제약까지는 옮기지 않는다 — 이 저장소는 아직 실사용 데이터가 없는
+    프로토타입이라, 그 정도로 오래된 DB 파일은 storage/deepsogak.db를 지우고
+    새로 시작하는 편이 이 마이그레이션 코드를 유지하는 것보다 간단하다.
+    """
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)")}
+    if "status" not in existing:
+        conn.execute("ALTER TABLE jobs ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'")
+    if "error_reason" not in existing:
+        conn.execute("ALTER TABLE jobs ADD COLUMN error_reason TEXT")
 
 
 def _require_path() -> Path:
@@ -74,6 +91,11 @@ def _require_path() -> Path:
 def _connect() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(_require_path())
     conn.row_factory = sqlite3.Row
+    # WAL(Write-Ahead Logging)은 쓰기 하나가 읽기 전체를 막는 SQLite 기본 동작을
+    # 완화해, 팀원 여러 명이 동시에 서버를 두드려도 잠금 경합이 덜 생기게 한다.
+    # busy_timeout은 그래도 잠깐 잠기는 순간에 바로 실패하지 않고 잠시 재시도하게 한다.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     try:
         yield conn
         conn.commit()
@@ -97,13 +119,19 @@ def create_job(
     deepbaeksin_applied: bool = False,
     deepbaeksin_meta: dict[str, Any] | None = None,
 ) -> None:
+    """이미 처리가 끝난 작업을 한 번에 기록한다(주로 테스트·단발성 스크립트용).
+
+    실제 서버는 대신 create_pending_job()으로 즉시 jobId를 내주고,
+    complete_job()/fail_job()으로 백그라운드 처리 결과를 나중에 채운다
+    (POST /api/protection/process가 딥백신 처리를 기다리지 않도록 하기 위함).
+    """
     with _connect() as conn:
         conn.execute(
             """
             INSERT INTO jobs
                 (id, original_path, protected_path, sha256, phash, created_at,
-                 deepbaeksin_applied, deepbaeksin_meta)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 deepbaeksin_applied, deepbaeksin_meta, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed')
             """,
             (
                 job_id,
@@ -118,15 +146,67 @@ def create_job(
         )
 
 
+def create_pending_job(job_id: str, *, original_path: Path, created_at: float) -> None:
+    """원본만 저장된 상태로 작업을 만든다. 딥백신 처리는 아직 안 끝났다."""
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO jobs (id, original_path, created_at, status)
+            VALUES (?, ?, ?, 'processing')
+            """,
+            (job_id, str(original_path), created_at),
+        )
+
+
+def complete_job(
+    job_id: str,
+    *,
+    protected_path: Path,
+    sha256: str,
+    phash: str,
+    deepbaeksin_applied: bool,
+    deepbaeksin_meta: dict[str, Any] | None,
+) -> None:
+    """백그라운드 딥백신 처리가 끝난 pending job을 completed로 채운다."""
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE jobs
+            SET protected_path = ?, sha256 = ?, phash = ?, deepbaeksin_applied = ?,
+                deepbaeksin_meta = ?, status = 'completed', error_reason = NULL
+            WHERE id = ?
+            """,
+            (
+                str(protected_path),
+                sha256,
+                phash,
+                1 if deepbaeksin_applied else 0,
+                json.dumps(deepbaeksin_meta, ensure_ascii=False) if deepbaeksin_meta else None,
+                job_id,
+            ),
+        )
+
+
+def fail_job(job_id: str, *, reason: str) -> None:
+    """백그라운드 처리 중 예외가 나면 실패 사유를 남긴다(원본은 그대로 둔다)."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE jobs SET status = 'failed', error_reason = ? WHERE id = ?",
+            (reason, job_id),
+        )
+
+
 def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "originalPath": Path(row["original_path"]),
-        "protectedPath": Path(row["protected_path"]),
+        "protectedPath": Path(row["protected_path"]) if row["protected_path"] else None,
         "sha256": row["sha256"],
         "phash": row["phash"],
         "createdAt": row["created_at"],
         "deepbaeksinApplied": bool(row["deepbaeksin_applied"]),
         "deepbaeksinMeta": json.loads(row["deepbaeksin_meta"]) if row["deepbaeksin_meta"] else None,
+        "status": row["status"],
+        "errorReason": row["error_reason"],
     }
 
 
@@ -136,19 +216,26 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     return _row_to_job(row) if row else None
 
 
-def get_latest_job() -> tuple[str, dict[str, Any]] | None:
+def get_latest_completed_job() -> tuple[str, dict[str, Any]] | None:
+    """얼굴가드 순찰 등에 쓸, 가장 최근에 '완료된' 보호사진을 찾는다.
+
+    아직 처리 중이거나 실패한 job은 protected_path가 없어 순찰 대상이 될 수
+    없으므로 completed만 본다.
+    """
     with _connect() as conn:
         row = conn.execute(
-            "SELECT * FROM jobs ORDER BY created_at DESC LIMIT 1"
+            "SELECT * FROM jobs WHERE status = 'completed' ORDER BY created_at DESC LIMIT 1"
         ).fetchone()
     if row is None:
         return None
     return row["id"], _row_to_job(row)
 
 
-def count_jobs() -> int:
+def count_completed_jobs() -> int:
     with _connect() as conn:
-        (count,) = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()
+        (count,) = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE status = 'completed'"
+        ).fetchone()
     return count
 
 
@@ -255,9 +342,22 @@ def get_report_count() -> int:
 
 
 def increment_report_count() -> int:
-    count = get_report_count() + 1
-    _set_state(_REPORT_COUNT_KEY, str(count))
-    return count
+    # 읽고 나서 1 더해 다시 쓰는 방식(get_report_count() + 1)은 동시에 두 요청이
+    # 들어오면 하나의 증가분을 잃어버릴 수 있다(lost update). INSERT ... ON
+    # CONFLICT ... DO UPDATE 한 문장으로 증가를 SQLite 트랜잭션 안에서 원자적으로
+    # 처리해 이 경합을 없앤다.
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_state (key, value) VALUES (?, '1')
+            ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1
+            """,
+            (_REPORT_COUNT_KEY,),
+        )
+        row = conn.execute(
+            "SELECT value FROM app_state WHERE key = ?", (_REPORT_COUNT_KEY,)
+        ).fetchone()
+    return int(row["value"])
 
 
 def reset_all() -> None:

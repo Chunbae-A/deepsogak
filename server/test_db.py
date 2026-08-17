@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -44,7 +45,7 @@ class DbTestCase(unittest.TestCase):
     def test_get_job_missing_returns_none(self):
         self.assertIsNone(db.get_job("does-not-exist"))
 
-    def test_get_latest_job_returns_most_recent_by_created_at(self):
+    def test_get_latest_completed_job_returns_most_recent_by_created_at(self):
         db.create_job(
             "older", original_path=Path("a"), protected_path=Path("a"),
             sha256="a", phash="a", created_at=100.0,
@@ -53,20 +54,20 @@ class DbTestCase(unittest.TestCase):
             "newer", original_path=Path("b"), protected_path=Path("b"),
             sha256="b", phash="b", created_at=200.0,
         )
-        latest = db.get_latest_job()
+        latest = db.get_latest_completed_job()
         self.assertIsNotNone(latest)
         job_id, job = latest
         self.assertEqual(job_id, "newer")
         self.assertEqual(job["sha256"], "b")
 
-    def test_get_latest_job_empty_returns_none(self):
-        self.assertIsNone(db.get_latest_job())
+    def test_get_latest_completed_job_empty_returns_none(self):
+        self.assertIsNone(db.get_latest_completed_job())
 
-    def test_count_jobs(self):
-        self.assertEqual(db.count_jobs(), 0)
+    def test_count_completed_jobs(self):
+        self.assertEqual(db.count_completed_jobs(), 0)
         db.create_job("a", original_path=Path("a"), protected_path=Path("a"), sha256="a", phash="a", created_at=1.0)
         db.create_job("b", original_path=Path("b"), protected_path=Path("b"), sha256="b", phash="b", created_at=2.0)
-        self.assertEqual(db.count_jobs(), 2)
+        self.assertEqual(db.count_completed_jobs(), 2)
 
     def test_manual_reports_preserve_insertion_order(self):
         db.add_manual_report("https://example.com/1", created_at=1.0)
@@ -125,10 +126,63 @@ class DbTestCase(unittest.TestCase):
 
         db.reset_all()
 
-        self.assertEqual(db.count_jobs(), 0)
+        self.assertEqual(db.count_completed_jobs(), 0)
         self.assertEqual(db.list_manual_reports(), [])
         self.assertEqual(db.get_confirmed_keep_ids(), [])
         self.assertEqual(db.get_report_count(), 0)
+
+    def test_concurrent_increment_report_count_has_no_lost_updates(self):
+        """여러 스레드가 동시에 신고 동의를 눌러도 카운트가 씹히면 안 된다.
+
+        WAL 모드가 'database is locked' 실패를 막고, increment_report_count의
+        원자적 UPSERT가 읽고-쓰는 사이의 경합(lost update)을 막는지 함께 검증한다.
+        """
+        thread_count = 8
+        increments_per_thread = 15
+        errors: list[BaseException] = []
+
+        def worker() -> None:
+            try:
+                for _ in range(increments_per_thread):
+                    db.increment_report_count()
+            except BaseException as exc:  # noqa: BLE001 - 스레드 예외를 메인에서 확인하려고 수집
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(thread_count)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(db.get_report_count(), thread_count * increments_per_thread)
+
+    def test_concurrent_job_creation_has_no_locking_errors(self):
+        """여러 스레드가 동시에 보호사진을 처리해도 쓰기 잠금 오류가 나면 안 된다."""
+        thread_count = 8
+        errors: list[BaseException] = []
+
+        def worker(index: int) -> None:
+            try:
+                db.create_job(
+                    f"job-{index}",
+                    original_path=Path(f"a{index}"),
+                    protected_path=Path(f"b{index}"),
+                    sha256=f"sha{index}",
+                    phash=f"phash{index}",
+                    created_at=float(index),
+                )
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(thread_count)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(db.count_completed_jobs(), thread_count)
 
 
 if __name__ == "__main__":

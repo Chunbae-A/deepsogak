@@ -11,6 +11,7 @@ PR 설명에 적어둔 수동 검증 기록(반복 48~53회, 유사도 1.0 -> 0.
 SSIM 0.997 유지)으로 대신한다.
 """
 
+import os
 import unittest
 from unittest.mock import patch
 
@@ -97,7 +98,7 @@ class ApplyDeepbaeksinTestCase(unittest.TestCase):
     def test_no_face_detected_returns_original_unchanged(self):
         fake_app = _FakeFaceApp(has_face=False, image_size=96)
         image = _solid_image()
-        with patch.object(deepbaeksin, "_get_face_app", return_value=fake_app):
+        with patch.object(deepbaeksin, "_get_face_apps", return_value={"fake_model": fake_app}):
             protected, meta = deepbaeksin.apply_deepbaeksin(image)
 
         self.assertFalse(meta["applied"])
@@ -107,7 +108,7 @@ class ApplyDeepbaeksinTestCase(unittest.TestCase):
 
     def test_model_unavailable_returns_original_unchanged(self):
         image = _solid_image()
-        with patch.object(deepbaeksin, "_get_face_app", return_value=None):
+        with patch.object(deepbaeksin, "_get_face_apps", return_value={"fake_model": None}):
             protected, meta = deepbaeksin.apply_deepbaeksin(image)
 
         self.assertFalse(meta["applied"])
@@ -123,7 +124,7 @@ class ApplyDeepbaeksinTestCase(unittest.TestCase):
         noise = rng.integers(100, 160, size=(size, size, 3), dtype=np.uint8)
         image = Image.fromarray(noise, mode="RGB")
 
-        with patch.object(deepbaeksin, "_get_face_app", return_value=fake_app):
+        with patch.object(deepbaeksin, "_get_face_apps", return_value={"fake_model": fake_app}):
             protected, meta = deepbaeksin.apply_deepbaeksin(
                 image,
                 epsilon=8,
@@ -155,7 +156,7 @@ class ApplyDeepbaeksinTestCase(unittest.TestCase):
         noise = rng.integers(100, 160, size=(size, size, 3), dtype=np.uint8)
         image = Image.fromarray(noise, mode="RGB")
 
-        with patch.object(deepbaeksin, "_get_face_app", return_value=fake_app):
+        with patch.object(deepbaeksin, "_get_face_apps", return_value={"fake_model": fake_app}):
             protected, meta = deepbaeksin.apply_deepbaeksin(
                 image, epsilon=0, max_iterations=20, time_budget_seconds=10.0
             )
@@ -170,7 +171,7 @@ class ApplyDeepbaeksinTestCase(unittest.TestCase):
         noise = rng.integers(100, 160, size=(size, size, 3), dtype=np.uint8)
         image = Image.fromarray(noise, mode="RGB")
 
-        with patch.object(deepbaeksin, "_get_face_app", return_value=fake_app):
+        with patch.object(deepbaeksin, "_get_face_apps", return_value={"fake_model": fake_app}):
             _, meta = deepbaeksin.apply_deepbaeksin(
                 image, max_iterations=80, time_budget_seconds=30.0, seed=2, jpeg_quality_check=80
             )
@@ -180,13 +181,75 @@ class ApplyDeepbaeksinTestCase(unittest.TestCase):
         self.assertLessEqual(meta["similarityAfterJpegRoundTrip"], 1.0)
 
 
+class TargetModelNamesTestCase(unittest.TestCase):
+    def test_defaults_to_single_model_without_env_var(self):
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop(deepbaeksin._TARGET_MODELS_ENV_VAR, None)
+            self.assertEqual(deepbaeksin.target_model_names(), ("buffalo_l",))
+
+    def test_parses_comma_separated_env_var(self):
+        with patch.dict("os.environ", {deepbaeksin._TARGET_MODELS_ENV_VAR: "buffalo_l, buffalo_sc ,"}):
+            self.assertEqual(deepbaeksin.target_model_names(), ("buffalo_l", "buffalo_sc"))
+
+
+class EnsembleTestCase(unittest.TestCase):
+    def test_ensemble_optimizes_average_similarity_across_models(self):
+        """두 가짜 모델을 동시에 타깃으로 주면, 결과는 각 모델 평균이 낮아지는
+        방향으로 나오고 메타데이터에 모델별 값이 함께 담겨야 한다."""
+        size = 96
+        fake_app_a = _FakeFaceApp(has_face=True, image_size=size)
+        fake_app_b = _FakeFaceApp(has_face=True, image_size=size)
+        rng = np.random.default_rng(11)
+        noise = rng.integers(100, 160, size=(size, size, 3), dtype=np.uint8)
+        image = Image.fromarray(noise, mode="RGB")
+
+        with patch.object(
+            deepbaeksin,
+            "_get_face_apps",
+            return_value={"model_a": fake_app_a, "model_b": fake_app_b},
+        ):
+            protected, meta = deepbaeksin.apply_deepbaeksin(
+                image, max_iterations=80, time_budget_seconds=30.0, seed=5
+            )
+
+        self.assertEqual(set(meta["usedModels"]), {"model_a", "model_b"})
+        self.assertIsNotNone(meta["similarityAfterByModel"])
+        self.assertEqual(set(meta["similarityAfterByModel"].keys()), {"model_a", "model_b"})
+        # 두 가짜 모델이 완전히 동일한 임베딩 함수를 쓰므로 평균과 개별값이 같아야 한다.
+        avg_of_models = sum(meta["similarityAfterByModel"].values()) / 2
+        self.assertAlmostEqual(meta["similarityAfter"], avg_of_models, places=5)
+        self.assertLess(meta["similarityAfter"], 1.0)
+        self.assertEqual(protected.size, image.size)
+
+    def test_one_failed_model_does_not_block_the_other(self):
+        """지정한 모델 중 하나가 로딩에 실패해도(None) 나머지 모델로 계속 진행한다."""
+        size = 96
+        fake_app = _FakeFaceApp(has_face=True, image_size=size)
+        rng = np.random.default_rng(9)
+        noise = rng.integers(100, 160, size=(size, size, 3), dtype=np.uint8)
+        image = Image.fromarray(noise, mode="RGB")
+
+        with patch.object(
+            deepbaeksin,
+            "_get_face_apps",
+            return_value={"model_a": fake_app, "model_b_failed": None},
+        ):
+            protected, meta = deepbaeksin.apply_deepbaeksin(
+                image, max_iterations=40, time_budget_seconds=30.0, seed=6
+            )
+
+        self.assertEqual(meta["usedModels"], ["model_a"])
+        self.assertNotIn("model_b_failed", meta["similarityAfterByModel"])
+        self.assertEqual(protected.size, image.size)
+
+
 class WarmUpTestCase(unittest.TestCase):
     def test_warm_up_true_when_model_loads(self):
-        with patch.object(deepbaeksin, "_get_face_app", return_value=object()):
+        with patch.object(deepbaeksin, "_get_face_apps", return_value={"fake_model": object()}):
             self.assertTrue(deepbaeksin.warm_up())
 
     def test_warm_up_false_when_model_unavailable(self):
-        with patch.object(deepbaeksin, "_get_face_app", return_value=None):
+        with patch.object(deepbaeksin, "_get_face_apps", return_value={"fake_model": None}):
             self.assertFalse(deepbaeksin.warm_up())
 
 
