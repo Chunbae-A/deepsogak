@@ -1,11 +1,7 @@
-"""역이미지 검색 파이프라인 (참고: https://github.com/BcKmini/copycat-watch).
+"""Google Cloud Vision Web Detection 기반 공개 후보 수집기.
 
-1) Google Cloud Vision Web Detection으로 공개 웹에서 후보 페이지/이미지를 수집
-2) 각 후보 이미지를 서버가 직접 내려받아 pHash로 실측 검증 — Vision이 "비슷하다"고
-   준 후보 중 실제로 등록 사진과 가까운 것만 골라낸다 (허위 후보 제거)
-
-EfficientNet-B4 딥페이크 판별 모델은 아직 없어 riskLevel은 이 pHash 유사도로만
-근사한다 — 실제 모델이 붙으면 이 시뮬레이션을 대체하면 된다.
+새 얼굴가드 API는 Vision이 찾은 URL을 ArcFace와 ONNX 모델 API에 전달한다.
+기존 클라이언트 호환 경로의 pHash 검증 함수도 당분간 함께 유지한다.
 """
 
 import base64
@@ -14,6 +10,7 @@ import logging
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import imagehash
@@ -22,6 +19,7 @@ from PIL import Image
 
 logger = logging.getLogger("deepsogak")
 
+VISION_ANNOTATE_URL = "https://vision.googleapis.com/v1/images:annotate"
 FETCH_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) DeepSogak/1.0"}
 VERIFY_TIMEOUT = 5
 VERIFY_MAX_BYTES = 5 * 1024 * 1024
@@ -37,6 +35,185 @@ _OG_IMAGE_RE = re.compile(
     re.IGNORECASE,
 )
 _IMG_TAG_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
+
+
+class VisionScanError(RuntimeError):
+    """Google Vision 후보 수집 실패를 비밀값 없이 서버 계층에 전달한다."""
+
+    def __init__(self, code: str, message: str, *, unavailable: bool = False) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.unavailable = unavailable
+
+
+def _request_web_detection(image_bytes: bytes) -> dict[str, Any]:
+    """Web Detection 원본 응답을 반환한다.
+
+    API 키는 URL이나 로그에 남지 않도록 Google 권장 방식인 x-goog-api-key
+    헤더로 전달한다. HTTP 200 안의 응답별 error 필드도 실패로 처리한다.
+    """
+
+    api_key = os.environ.get("GOOGLE_VISION_API_KEY", "").strip()
+    if not api_key:
+        raise VisionScanError(
+            "GOOGLE_VISION_API_KEY_MISSING",
+            "Google Vision API 키가 설정되지 않았습니다.",
+            unavailable=True,
+        )
+
+    try:
+        response = requests.post(
+            VISION_ANNOTATE_URL,
+            headers={"x-goog-api-key": api_key},
+            json={
+                "requests": [
+                    {
+                        "image": {"content": base64.b64encode(image_bytes).decode()},
+                        "features": [{"type": "WEB_DETECTION", "maxResults": 50}],
+                    }
+                ]
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as error:
+        raise VisionScanError(
+            "GOOGLE_VISION_REQUEST_FAILED",
+            "Google Vision Web Detection 호출에 실패했습니다.",
+            unavailable=True,
+        ) from error
+    except (TypeError, ValueError) as error:
+        raise VisionScanError(
+            "GOOGLE_VISION_INVALID_RESPONSE",
+            "Google Vision 응답 형식이 올바르지 않습니다.",
+        ) from error
+
+    responses = payload.get("responses")
+    if not isinstance(responses, list) or not responses or not isinstance(responses[0], dict):
+        raise VisionScanError(
+            "GOOGLE_VISION_INVALID_RESPONSE",
+            "Google Vision 응답에 분석 결과가 없습니다.",
+        )
+    first = responses[0]
+    if isinstance(first.get("error"), dict):
+        raise VisionScanError(
+            "GOOGLE_VISION_ANALYSIS_FAILED",
+            "Google Vision이 이미지 분석을 완료하지 못했습니다.",
+        )
+    web = first.get("webDetection", {})
+    if not isinstance(web, dict):
+        raise VisionScanError(
+            "GOOGLE_VISION_INVALID_RESPONSE",
+            "Google Vision Web Detection 결과가 올바르지 않습니다.",
+        )
+    return web
+
+
+def discover_web_candidates(
+    image_bytes: bytes,
+    *,
+    maximum_results: int = 10,
+) -> dict[str, Any]:
+    """Google Vision에서 공개 후보 URL을 수집해 모델 API 입력으로 정규화한다.
+
+    pHash로 먼저 제거하지 않는다. 크롭·압축·합성된 얼굴은 전체 이미지 pHash가
+    크게 달라질 수 있으므로, 후보의 실제 동일인 여부는 다음 단계 ArcFace가 맡는다.
+    """
+
+    if not 1 <= maximum_results <= 10:
+        raise ValueError("maximum_results는 1~10이어야 합니다.")
+    web = _request_web_detection(image_bytes)
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add_candidate(
+        *,
+        page_url: str | None,
+        media_url: str | None,
+        match_type: str,
+        page_title: str | None = None,
+    ) -> None:
+        page = (page_url or media_url or "").strip()
+        media = (media_url or "").strip()
+        if not page.startswith(("http://", "https://")):
+            return
+        if media and not media.startswith(("http://", "https://")):
+            media = ""
+        # 같은 이미지가 페이지별 목록과 전역 목록에 중복 등장해도 한 번만 분석한다.
+        key = media or page
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(
+            {
+                "page_url": page,
+                "media_url": media or None,
+                "thumbnail_url": media or None,
+                "provider": "google_vision_web_detection",
+                "match_type": match_type,
+                "page_title": page_title,
+            }
+        )
+
+    # 게시 페이지가 있는 후보를 우선한다. 신고자료에 원문 URL을 남길 수 있기 때문이다.
+    pages = web.get("pagesWithMatchingImages", [])
+    if isinstance(pages, list):
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            page_url = page.get("url")
+            title = page.get("pageTitle")
+            for item in page.get("fullMatchingImages", []) or []:
+                if isinstance(item, dict):
+                    add_candidate(
+                        page_url=page_url,
+                        media_url=item.get("url"),
+                        match_type="full_match",
+                        page_title=title,
+                    )
+            for item in page.get("partialMatchingImages", []) or []:
+                if isinstance(item, dict):
+                    add_candidate(
+                        page_url=page_url,
+                        media_url=item.get("url"),
+                        match_type="partial_match",
+                        page_title=title,
+                    )
+
+    for field, match_type in (
+        ("fullMatchingImages", "full_match"),
+        ("partialMatchingImages", "partial_match"),
+        ("visuallySimilarImages", "visually_similar"),
+    ):
+        items = web.get(field, [])
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, dict):
+                media_url = item.get("url")
+                add_candidate(
+                    page_url=media_url,
+                    media_url=media_url,
+                    match_type=match_type,
+                )
+
+    best_guess_labels = [
+        str(item.get("label"))
+        for item in web.get("bestGuessLabels", [])
+        if isinstance(item, dict) and item.get("label")
+    ]
+    raw_count = len(candidates)
+    return {
+        "provider": "google_vision_web_detection",
+        "status": "completed",
+        "raw_candidate_count": raw_count,
+        "candidate_count": min(raw_count, maximum_results),
+        "truncated_count": max(0, raw_count - maximum_results),
+        "best_guess_labels": best_guess_labels,
+        "candidates": candidates[:maximum_results],
+    }
 
 
 def _phash_similarity(query_hash: imagehash.ImageHash, candidate_image: Image.Image) -> float:
@@ -114,26 +291,10 @@ def _classify_source(url: str | None) -> str:
 def scan_web(image_bytes: bytes, query_hash: imagehash.ImageHash) -> list[dict] | None:
     """Vision Web Detection + pHash 실측 검증. API 키가 없거나 호출 실패 시 None
     (호출자가 시뮬레이션 데이터로 폴백)."""
-    api_key = os.environ.get("GOOGLE_VISION_API_KEY")
-    if not api_key:
-        return None
     try:
-        resp = requests.post(
-            f"https://vision.googleapis.com/v1/images:annotate?key={api_key}",
-            json={
-                "requests": [
-                    {
-                        "image": {"content": base64.b64encode(image_bytes).decode()},
-                        "features": [{"type": "WEB_DETECTION", "maxResults": 50}],
-                    }
-                ]
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        web = resp.json()["responses"][0].get("webDetection", {})
-    except Exception as e:
-        logger.warning("Vision API 호출 실패, 시뮬레이션 데이터로 폴백: %s", e)
+        web = _request_web_detection(image_bytes)
+    except VisionScanError as error:
+        logger.warning("Vision API 호출 실패, 시뮬레이션 데이터로 폴백: %s", error.code)
         return None
 
     candidates: list[dict] = []

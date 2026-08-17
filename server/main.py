@@ -1,11 +1,13 @@
 import hashlib
 import io
 import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import imagehash
 from dotenv import load_dotenv
@@ -14,10 +16,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 import db
 import deepbaeksin
+import model_api
 import vision_scan
 
 load_dotenv()
@@ -59,6 +63,10 @@ app.add_middleware(
     expose_headers=["Content-Disposition"],
 )
 app.mount("/static", StaticFiles(directory=STORAGE_DIR), name="static")
+
+# 얼굴가드 노출 스캔의 진행 상태. 프로토타입용 인메모리 저장소라 서버가
+# 재시작되면 소실된다(#52 계열 후속 작업에서 DB 영속화 예정).
+FACEGUARD_SCANS: dict[str, dict] = {}
 
 
 def _run_protection_job(job_id: str, raw: bytes, image_format: str, original_path: Path, protected_path: Path) -> None:
@@ -191,6 +199,408 @@ def save_protection(jobId: str):
     except OSError:
         raise HTTPException(status_code=500, detail="보호사진 저장 중 오류가 발생했습니다.")
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# 얼굴가드 모델 파이프라인(서버 전용 API)
+#
+# Google Vision: 공개 웹 후보 URL 수집
+# ArcFace: 후보 얼굴이 등록자와 같은 사람인지 확인
+# EfficientNet-B4 ONNX: 같은 사람 후보의 딥페이크 의심 원점수 계산
+#
+# 기존 앱 API는 변경하지 않는다. 클라이언트 연결 전 서버·모델 계약을 먼저 검증한다.
+# ---------------------------------------------------------------------------
+
+
+class StartFaceGuardScanBody(BaseModel):
+    referenceJobIds: list[str] = Field(min_length=1, max_length=5)
+    webMonitoringConsent: bool
+    maximumResults: int = Field(default=10, ge=1, le=10)
+
+
+def _faceguard_scan_record(scan_id: str) -> dict:
+    record = FACEGUARD_SCANS.get(scan_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="얼굴가드 분석 작업을 찾을 수 없습니다.")
+    return record
+
+
+def _raise_model_api_error(error: model_api.ModelApiError) -> None:
+    raise HTTPException(
+        status_code=503 if error.unavailable else 502,
+        detail={
+            "code": error.code,
+            "message": error.message or "얼굴가드 모델 API가 요청을 처리하지 못했습니다.",
+        },
+    )
+
+
+def _raise_vision_error(error: vision_scan.VisionScanError) -> None:
+    raise HTTPException(
+        status_code=503 if error.unavailable else 502,
+        detail={"code": error.code, "message": error.message},
+    )
+
+
+def _candidate_action(result: dict) -> str:
+    deepfake = result.get("deepfake")
+    deepfake = deepfake if isinstance(deepfake, dict) else {}
+    if result.get("identity_match") is False:
+        return "exclude_recommended"
+    if result.get("identity_match") is True and deepfake.get(
+        "is_suspected_deepfake"
+    ) is True:
+        return "review_required"
+    if result.get("identity_match") is True and deepfake.get("status") == "analyzed":
+        return "monitor"
+    return "manual_review_required"
+
+
+def _candidate_url_key(value: object) -> str | None:
+    """모델 API가 제거한 추적 쿼리와 무관하게 Vision 메타데이터를 다시 찾는다."""
+
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    return urlunsplit(
+        (parsed.scheme.lower(), parsed.netloc.lower(), parsed.path, "", "")
+    )
+
+
+def _public_candidate(item: dict, record: dict) -> dict:
+    if "face_match_level" in item:
+        page_url = item.get("source_url")
+        media_url = item.get("media_url")
+        discovery_by_url = record.get("discoveryByUrl", {})
+        discovery = discovery_by_url.get(
+            _candidate_url_key(media_url)
+        ) or discovery_by_url.get(_candidate_url_key(page_url), {})
+        face_level = item.get("face_match_level")
+        deepfake_signal = item.get("deepfake_signal")
+        return {
+            "candidateId": item.get("candidate_id"),
+            "sourceUrl": page_url,
+            "mediaUrl": media_url,
+            "thumbnailUrl": item.get("thumbnail_url"),
+            "sourceProvider": "google_vision_web_detection",
+            "visionMatchType": discovery.get("match_type"),
+            "faceSimilarity": item.get("face_similarity"),
+            "isSamePerson": (
+                True
+                if face_level == "matched"
+                else False
+                if face_level == "not_matched"
+                else None
+            ),
+            "faceAnalysisStatus": face_level,
+            "deepfakeScore": item.get("deepfake_score"),
+            "isSuspectedDeepfake": (
+                True
+                if deepfake_signal == "suspected"
+                else False
+                if deepfake_signal == "not_suspected"
+                else None
+            ),
+            "deepfakeAnalysisStatus": deepfake_signal,
+            "recommendedAction": item.get("recommended_action"),
+            "errorCode": None,
+            "warning": item.get("warning") or model_api.RESEARCH_WARNING,
+        }
+
+    result = item.get("result")
+    result = result if isinstance(result, dict) else {}
+    deepfake = result.get("deepfake")
+    deepfake = deepfake if isinstance(deepfake, dict) else {}
+    page_url = result.get("page_url")
+    media_url = result.get("media_url")
+    discovery_by_url = record.get("discoveryByUrl", {})
+    discovery = discovery_by_url.get(_candidate_url_key(media_url)) or discovery_by_url.get(
+        _candidate_url_key(page_url), {}
+    )
+    return {
+        "candidateId": item.get("candidate_id"),
+        "sourceUrl": page_url,
+        "mediaUrl": media_url,
+        "thumbnailUrl": result.get("thumbnail_url"),
+        "sourceProvider": "google_vision_web_detection",
+        "visionMatchType": discovery.get("match_type"),
+        "faceSimilarity": result.get("similarity_raw"),
+        "isSamePerson": result.get("identity_match"),
+        "faceAnalysisStatus": result.get("status"),
+        "deepfakeScore": deepfake.get("deepfake_score"),
+        "isSuspectedDeepfake": deepfake.get("is_suspected_deepfake"),
+        "deepfakeAnalysisStatus": deepfake.get("status", "not_analyzed"),
+        "recommendedAction": _candidate_action(result),
+        "errorCode": result.get("error_code") or deepfake.get("error_code"),
+        "warning": item.get("warning") or model_api.RESEARCH_WARNING,
+    }
+
+
+@app.get("/api/faceguard/health")
+def get_faceguard_health():
+    model_health = model_api.health()
+    vision_configured = bool(os.environ.get("GOOGLE_VISION_API_KEY", "").strip())
+    return {
+        "status": (
+            "ready"
+            if vision_configured
+            and model_health.get("connected")
+            and model_health.get("status") == "ok"
+            else "not_ready"
+        ),
+        "googleVision": {
+            "configured": vision_configured,
+            "liveRequestPerformed": False,
+            "role": "public_candidate_discovery",
+        },
+        "modelApi": model_health,
+        "pipeline": [
+            "google_vision_web_detection",
+            "arcface_identity_filter",
+            "efficientnet_b4_onnx_deepfake_analysis",
+        ],
+    }
+
+
+@app.get("/api/faceguard/capabilities")
+def get_faceguard_capabilities():
+    try:
+        payload = model_api.capabilities()
+    except model_api.ModelApiError as error:
+        _raise_model_api_error(error)
+    models = payload.get("models")
+    models = models if isinstance(models, list) else []
+    return {
+        "status": "ready" if payload.get("connected") else "not_ready",
+        "apiVersion": payload.get("api_version"),
+        "deploymentMode": payload.get("deployment_mode"),
+        "workflows": payload.get("workflows", []),
+        "models": [
+            {
+                "componentId": item.get("component_id"),
+                "role": item.get("role"),
+                "modelName": item.get("model_name"),
+                "loadState": item.get("load_state"),
+                "decisionStatus": item.get("decision_status"),
+                "scoreSemantics": item.get("score_semantics"),
+                "defaultEnabled": item.get("default_enabled"),
+            }
+            for item in models
+            if isinstance(item, dict)
+        ],
+        "googleVision": {
+            "configured": bool(os.environ.get("GOOGLE_VISION_API_KEY", "").strip()),
+            "role": "public_candidate_discovery",
+        },
+        "scoresAreProbabilities": False,
+        "automaticEnforcementAllowed": False,
+        "originalMediaPersisted": False,
+        "stateStorage": payload.get("state_storage"),
+        "warning": payload.get("warning") or model_api.RESEARCH_WARNING,
+    }
+
+
+@app.post("/api/faceguard/scans", status_code=202)
+async def start_faceguard_scan(body: StartFaceGuardScanBody):
+    if not body.webMonitoringConsent:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "WEB_MONITORING_CONSENT_REQUIRED",
+                "message": "사진을 Google Vision으로 전송하고 공개 웹을 검색하려면 동의가 필요합니다.",
+            },
+        )
+
+    job_ids = list(dict.fromkeys(body.referenceJobIds))
+    jobs: list[dict] = []
+    for job_id in job_ids:
+        job = db.get_job(job_id)
+        if job is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "REFERENCE_JOB_NOT_FOUND",
+                    "message": "등록 사진 처리 결과를 찾을 수 없습니다.",
+                },
+            )
+        if job["status"] != "completed":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "REFERENCE_JOB_NOT_READY",
+                    "message": "등록 사진의 딥백신 처리가 아직 끝나지 않았습니다.",
+                },
+            )
+        jobs.append(job)
+
+    try:
+        references = [
+            (
+                job["originalPath"].read_bytes(),
+                "image/png" if job["originalPath"].suffix.lower() == ".png" else "image/jpeg",
+            )
+            for job in jobs
+        ]
+        # 검색 제공자에는 EXIF가 제거된 보호본 한 장만 전달해 비용과 개인정보 전송을 줄인다.
+        query_image = jobs[0]["protectedPath"].read_bytes()
+    except (KeyError, OSError):
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "REFERENCE_IMAGE_READ_FAILED",
+                "message": "등록 사진을 읽지 못했습니다. 다시 업로드해 주세요.",
+            },
+        )
+
+    try:
+        discovery = await run_in_threadpool(
+            vision_scan.discover_web_candidates,
+            query_image,
+            maximum_results=body.maximumResults,
+        )
+    except vision_scan.VisionScanError as error:
+        _raise_vision_error(error)
+
+    candidates = discovery["candidates"]
+    if not candidates:
+        scan_id = f"vision-empty-{uuid.uuid4().hex[:12]}"
+        FACEGUARD_SCANS[scan_id] = {
+            "modelScanId": None,
+            "status": "completed",
+            "referenceJobIds": job_ids,
+            "discovery": discovery,
+            "discoveryByUrl": {},
+            "createdAt": time.time(),
+        }
+        return {
+            "scanId": scan_id,
+            "status": "completed",
+            "visionCandidateCount": 0,
+            "message": "Google Vision에서 공개 후보를 찾지 못했습니다.",
+            "warning": model_api.RESEARCH_WARNING,
+        }
+
+    try:
+        enrollment = await run_in_threadpool(
+            model_api.create_face_enrollment, references
+        )
+        enrollment_id = enrollment.get("enrollment_id")
+        if not isinstance(enrollment_id, str) or not enrollment_id:
+            raise model_api.ModelApiError("MODEL_API_ENROLLMENT_INVALID_RESPONSE")
+        model_scan = await run_in_threadpool(
+            model_api.start_candidate_scan,
+            enrollment_id,
+            candidates,
+            maximum_results=body.maximumResults,
+            idempotency_key=f"google-vision-{uuid.uuid4().hex}",
+        )
+    except model_api.ModelApiError as error:
+        _raise_model_api_error(error)
+
+    scan_id = model_scan.get("scan_id")
+    if not isinstance(scan_id, str) or not scan_id:
+        _raise_model_api_error(
+            model_api.ModelApiError("MODEL_API_SCAN_START_INVALID_RESPONSE")
+        )
+    FACEGUARD_SCANS[scan_id] = {
+        "modelScanId": scan_id,
+        "status": model_scan.get("status", "queued"),
+        "referenceJobIds": job_ids,
+        "enrollmentId": enrollment_id,
+        "discovery": discovery,
+        "discoveryByUrl": {
+            key: candidate
+            for candidate in candidates
+            for key in (
+                _candidate_url_key(candidate.get("media_url")),
+                _candidate_url_key(candidate.get("page_url")),
+            )
+            if key is not None
+        },
+        "createdAt": time.time(),
+    }
+    return {
+        "scanId": scan_id,
+        "status": model_scan.get("status", "queued"),
+        "visionCandidateCount": discovery["candidate_count"],
+        "visionRawCandidateCount": discovery["raw_candidate_count"],
+        "referenceCount": len(references),
+        "recommendedReferenceCount": 3,
+        "statusUrl": f"/api/faceguard/scans/{scan_id}",
+        "candidatesUrl": f"/api/faceguard/scans/{scan_id}/candidates",
+        "warning": model_scan.get("warning") or model_api.RESEARCH_WARNING,
+    }
+
+
+@app.get("/api/faceguard/scans/{scan_id}")
+async def get_faceguard_scan(scan_id: str):
+    record = _faceguard_scan_record(scan_id)
+    if record["modelScanId"] is None:
+        return {
+            "scanId": scan_id,
+            "status": "completed",
+            "progressPercent": 100,
+            "visionCandidateCount": 0,
+            "analyzedCandidateCount": 0,
+        }
+    try:
+        payload = await run_in_threadpool(
+            model_api.get_exposure_scan, record["modelScanId"]
+        )
+    except model_api.ModelApiError as error:
+        _raise_model_api_error(error)
+    progress = payload.get("progress")
+    progress = progress if isinstance(progress, dict) else {}
+    return {
+        "scanId": scan_id,
+        "status": payload.get("status", "failed"),
+        "progressPercent": payload.get("progress_percent", 0),
+        "visionCandidateCount": record["discovery"]["candidate_count"],
+        "analyzedCandidateCount": progress.get("analyzed_candidate_count", 0),
+        "identityMatchCount": progress.get("identity_match_count", 0),
+        "deepfakeCompletedCount": progress.get("deepfake_completed_count", 0),
+        "errorCode": payload.get("error_code"),
+        "warning": payload.get("warning") or model_api.RESEARCH_WARNING,
+    }
+
+
+@app.get("/api/faceguard/scans/{scan_id}/candidates")
+async def get_faceguard_candidates(scan_id: str):
+    record = _faceguard_scan_record(scan_id)
+    if record["modelScanId"] is None:
+        return {
+            "scanId": scan_id,
+            "status": "completed",
+            "candidateCount": 0,
+            "candidates": [],
+            "warning": model_api.RESEARCH_WARNING,
+        }
+    try:
+        payload = await run_in_threadpool(
+            model_api.get_exposure_candidates, record["modelScanId"]
+        )
+    except model_api.ModelApiError as error:
+        _raise_model_api_error(error)
+    raw_candidates = payload.get("candidates")
+    if not isinstance(raw_candidates, list):
+        _raise_model_api_error(
+            model_api.ModelApiError("MODEL_API_SCAN_CANDIDATES_INVALID_RESPONSE")
+        )
+    candidates = [
+        _public_candidate(item, record)
+        for item in raw_candidates
+        if isinstance(item, dict)
+    ]
+    return {
+        "scanId": scan_id,
+        "status": payload.get("status", "failed"),
+        "candidateCount": len(candidates),
+        "candidates": candidates,
+        "warning": payload.get("warning") or model_api.RESEARCH_WARNING,
+    }
 
 
 # ---------------------------------------------------------------------------
