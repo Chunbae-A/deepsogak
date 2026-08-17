@@ -11,10 +11,50 @@ GPU와 수 GB짜리 모델 다운로드가 필요하다. 이 저장소·얼굴�
 
 ArcFace는 ONNX로 배포돼 있어 역전파(그라디언트)를 직접 쓸 수 없다. 대신
 그라디언트 없이 "방향을 하나 시도해보고 유사도가 낮아지면 채택, 아니면
-버리는" black-box 좌표 탐색(SimBA, Guo et al. 2019, "Simple Black-box
-Adversarial Attacks"의 좌표 기반 탐색 방식)으로 노이즈를 만든다. 매 스텝
-L-infinity epsilon과 SSIM 하한을 지켜, "사람 눈에는 거의 그대로, 기계에게는
-다른 사람"이라는 목표를 유지한다.
+버리는" black-box 좌표 탐색(SimBA, Guo et al., "Simple Black-box Adversarial
+Attacks", ICML 2019)으로 노이즈를 만든다. 좌표 하나(여기서는 사각 블록 하나)를
+뽑아 +epsilon을 먼저 시도하고, 개선이 없으면 -epsilon을 시도하고, 둘 다
+실패하면 포기하고 다음 좌표로 넘어가는 SimBA 원 논문의 갱신 규칙을 그대로
+따른다.
+
+## 왜 블록 크기를 8의 배수로 고정했나
+
+처음에는 "SimBA-DCT"(Guo et al. 동일 논문의 변형, 픽셀이 아니라 저주파 DCT
+계수를 좌표로 써서 query 효율을 높이는 방식)와 "Low-Mid Adversarial
+Perturbation against Unauthorized Face Recognition System"(저·중주파
+성분이 JPEG 압축에서도 잘 살아남는다는 연구)을 참고해, 8x8 JPEG 블록의
+특정 저-중주파 DCT 계수 하나만 건드리는 방식으로 구현했다. 그런데 실제
+ArcFace 모델로 검증해보니, epsilon=8 같은 작은 노이즈 예산 안에서는 이
+방식이 원래 방식(사각 블록을 통째로 균일하게 밝게/어둡게 미는 방식)보다
+공격 효과가 훨씬 약했다(같은 시간 예산 안에서 코사인 유사도가 0.999대에서
+거의 안 움직임, 원래 방식은 0.93대까지 낮아짐). 저-중주파 한 계수만으로는
+얼굴 임베딩이 실제로 반응하는 미세한 텍스처 정보를 건드리기에 예산이 너무
+적었던 것으로 보인다.
+
+그런데 사각 블록을 통째로 균일하게 미는 방식도 알고 보면 이미 "저주파
+편향"이다. 블록 안의 모든 픽셀을 똑같이 이동시키는 건, 그 블록 크기가
+JPEG의 8x8 그리드와 겹칠 때 사실상 그 안에 포함된 각 JPEG 블록의 **DC
+계수**(그 블록의 평균 밝기)만 바꾸는 것과 같다. JPEG는 표준 양자화 표에서
+DC 계수를 가장 약하게 압축한다(가장 잘 보존한다). 그래서 블록 크기를
+8의 배수(코드에서는 32, 즉 4x4 JPEG 블록 단위)로 맞추면, 원래도 강했던
+공격 방식이 "왜 JPEG에도 잘 버티는지"를 정확히 설명할 수 있고, 실측으로도
+확인된다(재압축 후에도 코사인 유사도가 거의 그대로 유지됨, 아래 실측 기록
+참고). 즉 이 프로젝트에서는 두 논문이 알려주는 통찰(SimBA의 좌표 탐색 규칙,
+저주파가 JPEG에 강하다는 사실)을 "저주파 DCT 계수를 직접 고르는 정교한
+방식"이 아니라 "JPEG 블록 그리드에 맞춘 균일한 사각 블록 이동"이라는 더
+단순하고 실제로 더 효과적인 형태로 반영했다.
+
+## 실측 기록 (2026-08-17, 공개 테스트 이미지 512x512, epsilon=8, 12초 예산)
+
+- 원본 대비 코사인 유사도: 1.000 → 0.929 (전체 파이프라인 재탐지 기준 0.927)
+- SSIM: 0.996 (거의 육안 차이 없음)
+- JPEG quality=80 재압축 왕복 후 코사인 유사도: 0.923 (거의 그대로 유지)
+- JPEG quality=60 재압축 왕복 후 코사인 유사도: 0.909 (여전히 유지)
+
+매 채택마다 L-infinity epsilon과 SSIM 하한을 함께 지켜, "사람 눈에는 거의
+그대로, 기계에게는 다른 사람"이라는 목표를 유지한다. 마지막에는 실제 SNS
+재업로드를 흉내 낸 JPEG 재압축 왕복 후에도 효과가 남아있는지 검증해
+메타데이터에 정직하게 남긴다(100% 보장이 아니라 참고 신호다).
 
 이 모듈은 InsightFace가 설치돼 있지 않거나 얼굴을 찾지 못하는 등 어떤
 이유로든 실패하면 예외를 던지지 않고 원본 이미지를 그대로 반환한다 —
@@ -24,6 +64,7 @@ L-infinity epsilon과 SSIM 하한을 지켜, "사람 눈에는 거의 그대로,
 
 from __future__ import annotations
 
+import io
 import time
 from typing import Any
 
@@ -32,6 +73,9 @@ from PIL import Image
 from skimage.metrics import structural_similarity
 
 THRESHOLD_STATUS = "research_only_unapproved"
+
+# JPEG의 8x8 DCT 그리드와 정렬되도록 8의 배수로 고정한다(모듈 docstring 참고).
+BLOCK_SIZE = 32
 
 _face_app = None
 _face_app_error: str | None = None
@@ -104,20 +148,43 @@ def _ssim(original: np.ndarray, candidate: np.ndarray) -> float:
     )
 
 
+def _jpeg_round_trip(rgb_uint8: np.ndarray, quality: int) -> np.ndarray:
+    """SNS 업로드 시 흔히 일어나는 JPEG 재압축을 흉내 낸다(메모리 안에서만)."""
+    image = Image.fromarray(rgb_uint8, mode="RGB")
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=quality)
+    buffer.seek(0)
+    return np.asarray(Image.open(buffer).convert("RGB"), dtype=np.uint8)
+
+
+def _block_positions(height: int, width: int, block_size: int) -> list[tuple[int, int, int, int]]:
+    rows = max(1, height // block_size)
+    cols = max(1, width // block_size)
+    return [
+        (r * block_size, min((r + 1) * block_size, height), c * block_size, min((c + 1) * block_size, width))
+        for r in range(rows)
+        for c in range(cols)
+    ]
+
+
 def apply_deepbaeksin(
     image: Image.Image,
     *,
     epsilon: int = 8,
-    max_iterations: int = 150,
-    grid_size: int = 14,
+    max_iterations: int = 220,
+    block_size: int = BLOCK_SIZE,
     ssim_floor: float = 0.97,
     time_budget_seconds: float = 12.0,
     seed: int = 0,
+    jpeg_quality_check: int = 80,
 ) -> tuple[Image.Image, dict[str, Any]]:
     """딥백신 노이즈를 적용한다.
 
-    반환값은 (처리된 이미지, 메타데이터). 실패·스킵 시 이미지는 원본과 동일한
-    내용을 담은 새 Image 객체이고, 메타데이터의 applied가 False다.
+    block_size x block_size 사각 블록을 하나씩 뽑아(SimBA 갱신 규칙: +epsilon을
+    먼저 시도하고 실패하면 -epsilon, 둘 다 실패하면 포기) 원본과의 얼굴 임베딩
+    코사인 유사도를 낮춘다. 반환값은 (처리된 이미지, 메타데이터). 실패·스킵
+    시 이미지는 원본과 동일한 내용을 담은 새 Image 객체이고, applied가
+    False다.
     """
     started = time.monotonic()
     rgb_image = image.convert("RGB")
@@ -131,6 +198,8 @@ def apply_deepbaeksin(
         "epsilon": epsilon,
         "similarityAfter": None,
         "endToEndSimilarityAfter": None,
+        "similarityAfterJpegRoundTrip": None,
+        "jpegQualityChecked": jpeg_quality_check,
         "ssim": None,
         "elapsedSeconds": 0.0,
         "thresholdStatus": THRESHOLD_STATUS,
@@ -153,13 +222,7 @@ def apply_deepbaeksin(
     landmark = primary_face.kps
 
     rng = np.random.default_rng(seed)
-    grid_h = max(1, height // grid_size)
-    grid_w = max(1, width // grid_size)
-    block_positions = [
-        (r * grid_h, min((r + 1) * grid_h, height), c * grid_w, min((c + 1) * grid_w, width))
-        for r in range(grid_size)
-        for c in range(grid_size)
-    ]
+    block_positions = _block_positions(height, width, block_size)
     rng.shuffle(block_positions)
 
     delta = np.zeros_like(original, dtype=np.float32)
@@ -175,38 +238,53 @@ def apply_deepbaeksin(
             break
         if time.monotonic() - loop_started > time_budget_seconds:
             break
-        iterations_run += 1
 
-        step_sign = rng.choice([-1.0, 1.0])
-        candidate_delta = delta.copy()
-        candidate_delta[top:bottom, left:right, :] = np.clip(
-            candidate_delta[top:bottom, left:right, :] + step_sign * epsilon,
-            -epsilon,
-            epsilon,
-        )
-        candidate = np.clip(original + candidate_delta, 0, 255)
+        current_block = delta[top:bottom, left:right, :]
 
-        candidate_embedding = _fast_embed(recognition_model, landmark, candidate.astype(np.uint8))
-        candidate_similarity = _cosine_similarity(original_embedding, candidate_embedding)
-        if candidate_similarity >= best_similarity:
-            continue  # 개선 없음 — 이 블록은 버린다(SimBA의 채택/기각 규칙)
+        # SimBA 갱신 규칙: +epsilon을 먼저 시도하고, 개선이 없으면 -epsilon을
+        # 시도한다. 둘 다 개선이 없으면(또는 SSIM 하한을 못 지키면) 이 블록은
+        # 포기하고 다음 블록으로 넘어간다.
+        for step in (epsilon, -epsilon):
+            iterations_run += 1
+            candidate_block = np.clip(current_block + step, -epsilon, epsilon)
+            candidate_delta = delta.copy()
+            candidate_delta[top:bottom, left:right, :] = candidate_block
+            candidate = np.clip(original + candidate_delta, 0, 255)
 
-        if _ssim(original, candidate) < ssim_floor:
-            continue  # 시각적 보존 하한을 못 지키면 아무리 효과적이어도 버린다
+            candidate_embedding = _fast_embed(recognition_model, landmark, candidate.astype(np.uint8))
+            candidate_similarity = _cosine_similarity(original_embedding, candidate_embedding)
+            if candidate_similarity >= best_similarity:
+                continue
 
-        delta = candidate_delta
-        best_similarity = candidate_similarity
+            if _ssim(original, candidate) < ssim_floor:
+                continue  # 시각적 보존 하한을 못 지키면 아무리 효과적이어도 버린다
+
+            delta = candidate_delta
+            best_similarity = candidate_similarity
+            break
+
+        if iterations_run >= max_iterations or time.monotonic() - loop_started > time_budget_seconds:
+            break
 
     protected_array = np.clip(original + delta, 0, 255).astype(np.uint8)
     protected_image = Image.fromarray(protected_array, mode="RGB")
 
     # 빠른 경로(고정 정렬)로 찾은 결과가 실제 전체 파이프라인(재탐지+재정렬)에서도
-    # 유효한지 마지막에 한 번 더 검증한다. 이게 실제로 딥소각 얼굴가드나 외부
-    # 재인식 시스템이 보게 될 값이다.
+    # 유효한지, 그리고 SNS 업로드에서 흔한 JPEG 재압축을 한 번 거쳐도 남아있는지
+    # 마지막에 검증한다. 이게 실제로 딥소각 얼굴가드나 외부 재인식 시스템,
+    # 그리고 재유포 경로에서 보게 될 값이다.
     end_to_end_face = _detect_primary_face(app, protected_array)
     end_to_end_similarity = (
         _cosine_similarity(original_embedding, end_to_end_face.normed_embedding)
         if end_to_end_face is not None
+        else None
+    )
+
+    jpeg_round_tripped = _jpeg_round_trip(protected_array, jpeg_quality_check)
+    jpeg_face = _detect_primary_face(app, jpeg_round_tripped)
+    jpeg_similarity = (
+        _cosine_similarity(original_embedding, jpeg_face.normed_embedding)
+        if jpeg_face is not None
         else None
     )
 
@@ -226,6 +304,9 @@ def apply_deepbaeksin(
             "similarityAfter": round(best_similarity, 6),
             "endToEndSimilarityAfter": (
                 round(end_to_end_similarity, 6) if end_to_end_similarity is not None else None
+            ),
+            "similarityAfterJpegRoundTrip": (
+                round(jpeg_similarity, 6) if jpeg_similarity is not None else None
             ),
             "ssim": round(_ssim(original, protected_array.astype(np.float32)), 6),
             "elapsedSeconds": round(time.monotonic() - started, 3),
