@@ -36,8 +36,10 @@ services:
         condition: service_healthy
     volumes:
       - faceguard-server-storage:/app/storage
+      - faceguard-server-data:/app/data
     restart: unless-stopped
 
 volumes:
   faceguard-insightface-models:
   faceguard-server-storage:
+  faceguard-server-data:
