@@ -37,6 +37,14 @@ _face_app = None
 _face_app_error: str | None = None
 
 
+def warm_up() -> bool:
+    """서버 시작 시 미리 호출해 모델 로딩 비용을 첫 요청 밖으로 빼낸다.
+
+    반환값은 로딩 성공 여부(사용 가능한 GPU/CPU 프로바이더로 모델을 올렸는지).
+    """
+    return _get_face_app() is not None
+
+
 def _get_face_app():
     """InsightFace FaceAnalysis(buffalo_l)를 지연 로딩한다. 실패하면 None."""
     global _face_app, _face_app_error

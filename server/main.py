@@ -1,7 +1,9 @@
 import hashlib
 import io
+import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -14,9 +16,13 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 
+import db
+import deepbaeksin
 import vision_scan
 
 load_dotenv()
+
+logger = logging.getLogger("deepsogak.server")
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 안전 업로드 화면 안내(최대 20MB)와 동일한 값
 ALLOWED_FORMATS = {"JPEG", "PNG"}
@@ -26,10 +32,25 @@ STORAGE_DIR = BASE_DIR / "storage"
 UPLOADS_DIR = STORAGE_DIR / "uploads"
 PROTECTED_DIR = STORAGE_DIR / "protected"
 SAVED_DIR = STORAGE_DIR / "saved"
+DB_PATH = STORAGE_DIR / "deepsogak.db"
 for d in (UPLOADS_DIR, PROTECTED_DIR, SAVED_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="deepsogak-server")
+db.init_db(DB_PATH)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # 딥백신 모델(ArcFace) 로딩은 몇 초 걸린다. 서버가 뜰 때 미리 한 번 불러
+    # 첫 보호사진 요청이 그 비용을 떠안지 않게 한다. 로딩에 실패해도(모델
+    # 파일이 없는 환경 등) 서버 자체는 정상 기동하고, 딥백신은 요청마다
+    # "model_unavailable"로 정직하게 스킵된다.
+    warmed = deepbaeksin.warm_up()
+    logger.info("deepbaeksin warm_up: %s", "ok" if warmed else "unavailable, will skip per request")
+    yield
+
+
+app = FastAPI(title="deepsogak-server", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -38,10 +59,6 @@ app.add_middleware(
     expose_headers=["Content-Disposition"],
 )
 app.mount("/static", StaticFiles(directory=STORAGE_DIR), name="static")
-
-# 프로토타입용 인메모리 저장소. 실서비스에서는 DB로 교체한다.
-JOBS: dict[str, dict] = {}
-REPORT_COUNT = 0
 
 
 @app.post("/api/protection/process")
@@ -71,33 +88,60 @@ async def process_protection(photo: UploadFile):
         original_path.write_bytes(raw)
 
         # EXIF·GPS 메타데이터 제거: 픽셀 데이터만 가진 새 이미지에 다시 담아 저장한다.
-        # TODO(AI 모델 연동): 여기서 딥백신 Beta(적대적 노이즈) 적용을 추가한다.
         clean_image = Image.new(image.mode, image.size)
         clean_image.putdata(list(image.getdata()))
-        clean_image.save(protected_path, format=image.format)
+
+        # 딥백신: ArcFace 임베딩을 타깃으로 한 적대적 노이즈 적용을 시도한다.
+        # 얼굴이 없거나 모델을 쓸 수 없으면 예외 없이 원본(EXIF만 제거된 상태)을
+        # 그대로 돌려주고, 그 사실을 deepbaeksin_meta에 정직하게 남긴다.
+        protected_image, deepbaeksin_meta = deepbaeksin.apply_deepbaeksin(clean_image)
+        protected_image.save(protected_path, format=image.format)
     except OSError:
         raise HTTPException(status_code=500, detail="이미지 처리 중 오류가 발생했습니다.")
 
     protected_bytes = protected_path.read_bytes()
     sha256 = hashlib.sha256(protected_bytes).hexdigest()
-    phash = str(imagehash.phash(clean_image))
+    phash = str(imagehash.phash(protected_image))
 
-    JOBS[job_id] = {
-        "originalPath": original_path,
-        "protectedPath": protected_path,
-        "sha256": sha256,
-        "phash": phash,
-        "createdAt": time.time(),
-    }
+    db.create_job(
+        job_id,
+        original_path=original_path,
+        protected_path=protected_path,
+        sha256=sha256,
+        phash=phash,
+        created_at=time.time(),
+        deepbaeksin_applied=deepbaeksin_meta["applied"],
+        deepbaeksin_meta=deepbaeksin_meta,
+    )
 
     return {"jobId": job_id}
 
 
+_DEEPBAEKSIN_CHECK_MESSAGES = {
+    "ok": "딥백신 적용 완료 (원본과의 얼굴 임베딩 유사도를 {similarity:.0%}로 낮춤)",
+    "face_undetectable_after_protection": "딥백신 적용 완료 (보호 처리 후 자동 얼굴 인식 실패 — 강한 보호 신호)",
+    "no_effective_direction_found": "딥백신 시도했으나 이번 사진에서는 뚜렷한 효과를 찾지 못함",
+    "no_face_detected": "딥백신 미적용 — 사진에서 얼굴을 찾지 못함",
+    "model_unavailable": "딥백신 미적용 — 노이즈 모델을 사용할 수 없는 환경",
+}
+
+
+def _deepbaeksin_check_message(meta: dict) -> str:
+    reason = meta.get("reason")
+    template = _DEEPBAEKSIN_CHECK_MESSAGES.get(reason, "딥백신 처리 결과를 확인할 수 없음")
+    similarity = meta.get("endToEndSimilarityAfter")
+    if reason == "ok" and similarity is not None:
+        return template.format(similarity=similarity)
+    return template
+
+
 @app.get("/api/protection/result")
 def get_protection_result(jobId: str):
-    job = JOBS.get(jobId)
+    job = db.get_job(jobId)
     if not job:
         raise HTTPException(status_code=404, detail="처리 결과를 찾을 수 없습니다.")
+
+    deepbaeksin_meta = job["deepbaeksinMeta"] or {"reason": None}
 
     return {
         "originalLabel": "원본 사진",
@@ -107,17 +151,18 @@ def get_protection_result(jobId: str):
         "sha256": job["sha256"],
         "phash": job["phash"],
         "appliedChecks": [
-            "딥백신 Beta 적용 완료",
+            _deepbaeksin_check_message(deepbaeksin_meta),
             "불필요한 위치정보 제거 완료",
             "C2PA 출처정보 생성 완료",
             "SHA-256·pHash 등록 완료",
         ],
+        "deepbaeksin": deepbaeksin_meta,
     }
 
 
 @app.post("/api/protection/save")
 def save_protection(jobId: str):
-    job = JOBS.get(jobId)
+    job = db.get_job(jobId)
     if not job:
         raise HTTPException(status_code=404, detail="처리 결과를 찾을 수 없습니다.")
     saved_path = SAVED_DIR / job["protectedPath"].name
@@ -135,21 +180,18 @@ def save_protection(jobId: str):
 # 딥페이크 판별(EfficientNet-B4) 모델은 아직 없어 riskLevel은 pHash 유사도로 근사한다.
 # ---------------------------------------------------------------------------
 
-_scan_cache: dict = {"job_id": None, "matches": None}
-
-
 def _get_active_matches() -> list[dict] | None:
-    if not JOBS:
+    latest = db.get_latest_job()
+    if latest is None:
         return None
-    latest_job_id = max(JOBS, key=lambda k: JOBS[k]["createdAt"])
-    if _scan_cache["job_id"] == latest_job_id:
-        return _scan_cache["matches"]
-    job = JOBS[latest_job_id]
+    latest_job_id, job = latest
+    cached = db.get_scan_cache(latest_job_id)
+    if cached is not None:
+        return cached
     image_bytes = job["protectedPath"].read_bytes()
     query_hash = imagehash.hex_to_hash(job["phash"])
     matches = vision_scan.scan_web(image_bytes, query_hash)
-    _scan_cache["job_id"] = latest_job_id
-    _scan_cache["matches"] = matches
+    db.set_scan_cache(latest_job_id, matches)
     return matches
 
 
@@ -163,7 +205,6 @@ def _risk_from_similarity(similarity: float) -> tuple[str, str]:
 
 # 사용자가 "URL·캡처·파일 직접 제보"로 추가한 항목. 자동 순찰 대상이 아닌 비공개
 # 채널을 지인 제보로 보완하는 기획서 2.2절 "제보 경로"를 실제로 반영한다.
-_manual_reports: list[dict] = []  # [{"url": str}]
 
 
 class ManualReportBody(BaseModel):
@@ -175,7 +216,7 @@ def submit_manual_report(body: ManualReportBody):
     url = body.url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="URL을 입력해 주세요.")
-    _manual_reports.append({"url": url})
+    db.add_manual_report(url, time.time())
     return {"ok": True}
 
 
@@ -198,12 +239,13 @@ def get_monitoring_summary():
         last_checked = "방금 확인"
         sources = [{"label": label, "count": f"{count}건"} for label, count in counts.items()]
 
-    if _manual_reports:
-        sources.append({"label": "직접 제보", "count": f"{len(_manual_reports)}건"})
+    manual_reports = db.list_manual_reports()
+    if manual_reports:
+        sources.append({"label": "직접 제보", "count": f"{len(manual_reports)}건"})
 
     return {
         "lastCheckedAt": last_checked,
-        "totalCandidates": base_total + len(_manual_reports),
+        "totalCandidates": base_total + len(manual_reports),
         "sources": sources,
     }
 
@@ -231,7 +273,7 @@ def get_candidates():
                 "thumbnailUrl": m["image_url"],
             })
 
-    for j, _rep in enumerate(_manual_reports, start=len(result) + 1):
+    for j, _rep in enumerate(db.list_manual_reports(), start=len(result) + 1):
         result.append({
             "id": f"c{j}",
             "label": f"후보 {j}",
@@ -280,7 +322,7 @@ def get_candidate_detail(candidate_id: str):
     index = int(candidate_id[1:]) - 1
 
     if index >= base_count:
-        rep = _manual_reports[index - base_count]
+        rep = db.list_manual_reports()[index - base_count]
         return {
             **base,
             "sourceLabel": "직접 제보",
@@ -314,33 +356,32 @@ class ConfirmCandidatesBody(BaseModel):
 
 
 # 후보 검토에서 "제외"하지 않고 남긴 후보 id들. 신고서 초안이 어떤 후보를 다룰지
-# 정하는 데 쓴다 (프로토타입 인메모리 저장소라 사용자·세션 구분 없이 마지막 선택만 남는다).
-_confirmed_keep_ids: list[str] = []
+# 정하는 데 쓴다 (프로토타입 저장소라 사용자·세션 구분 없이 마지막 선택만 남는다).
 
 
 @app.post("/api/monitoring/candidates/confirm")
 def confirm_candidates(body: ConfirmCandidatesBody):
-    global _confirmed_keep_ids, _draft_overrides
-    _confirmed_keep_ids = body.keepIds
-    _draft_overrides = None
+    db.set_confirmed_keep_ids(body.keepIds)
+    db.set_draft_overrides(None)
     return {"ok": True, "keepIds": body.keepIds}
 
 
 # "직접 수정"으로 사용자가 덮어쓴 증거 초안. 값이 있으면 계산된 초안보다 우선한다.
-_draft_overrides: list[dict] | None = None
 
 
 def _build_report_draft() -> list[dict]:
-    if _draft_overrides is not None:
-        return _draft_overrides
+    draft_overrides = db.get_draft_overrides()
+    if draft_overrides is not None:
+        return draft_overrides
 
     matches = _get_active_matches()
     base_count = len(matches) if matches is not None else 3
-    primary_id = _confirmed_keep_ids[0] if _confirmed_keep_ids else None
+    confirmed_keep_ids = db.get_confirmed_keep_ids()
+    primary_id = confirmed_keep_ids[0] if confirmed_keep_ids else None
     primary_index = int(primary_id[1:]) - 1 if primary_id else None
 
     if primary_index is not None and primary_index >= base_count:
-        rep = _manual_reports[primary_index - base_count]
+        rep = db.list_manual_reports()[primary_index - base_count]
         return [
             {"key": "postUrl", "label": "게시물 URL", "value": rep["url"]},
             {"key": "account", "label": "게시 계정", "value": "-"},
@@ -395,15 +436,13 @@ class UpdateReportDraftBody(BaseModel):
 
 @app.post("/api/report/draft")
 def update_report_draft(body: UpdateReportDraftBody):
-    global _draft_overrides
-    _draft_overrides = [f.model_dump() for f in body.fields]
+    db.set_draft_overrides([f.model_dump() for f in body.fields])
     return {"ok": True}
 
 
 @app.post("/api/report/consent")
 def submit_report_consent():
-    global REPORT_COUNT
-    REPORT_COUNT += 1
+    db.increment_report_count()
     return {"ok": True}
 
 
@@ -434,7 +473,7 @@ def get_report_package():
 
 # ---------------------------------------------------------------------------
 # 홈 화면 요약. 서비스 전체 계정·통계 시스템은 아직 없어(프로토타입 인메모리 저장소
-# 기준) 이번 세션에서 처리한 보호사진·노출후보·신고자료 건수를 그대로 보여준다.
+# 기준) DB에 누적된 보호사진·노출후보·신고자료 건수를 그대로 보여준다.
 # ---------------------------------------------------------------------------
 
 
@@ -442,8 +481,8 @@ def get_report_package():
 def get_home_summary():
     monitoring = get_monitoring_summary()
     return {
-        "protectedCount": len(JOBS),
+        "protectedCount": db.count_jobs(),
         "candidateCount": monitoring["totalCandidates"],
-        "reportCount": REPORT_COUNT,
+        "reportCount": db.get_report_count(),
         "lastCheckedAt": monitoring["lastCheckedAt"],
     }
