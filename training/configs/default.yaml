@@ -1,0 +1,39 @@
+# 실제 학습 실행용 기본 설정. training/README.md 참고.
+
+data_root: ../data           # data/raw/<name>, data/processed/<name> 를 담는 루트.
+                              # 대용량 데이터를 다른 드라이브에 뒀다면 절대경로로 덮어쓴다
+                              # (예: D:/defake 아래에 raw/ffpp, raw/celebdf 형태로 둔 경우
+                              # 이 값을 "D:/defake"로 바꾸면 나머지 코드는 그대로 동작한다).
+run_dir: runs
+
+model:
+  arch: tf_efficientnet_b4
+  pretrained: true
+  num_classes: 1              # BCEWithLogitsLoss, raw logit 1개 출력 — 서빙 계약과 동일
+  aligned_face_size: 224      # InsightFace norm_crop 크기 (서빙과 동일, faceguard_bridge 참고)
+  input_size: 380             # 모델 입력 리사이즈 크기 (서빙과 동일)
+
+train:
+  epochs: 20
+  batch_size: 32
+  lr: 0.0003
+  weight_decay: 0.00001
+  num_workers: 4
+  seed: 42
+  val_fraction: 0.15          # subject-level 분할 비율
+
+video:
+  frame_count: 16             # faceguard_api.video.sample_video_frame_indices와 동일
+  minimum_valid_frames: 4
+
+gate:
+  # 사용자 목표치(검증 AUC ≥ 0.93, 재현율 ≥ 85%)를 그대로 반영. display_approved/
+  # gate.overall_pass 판정에 쓰인다 — calibrate.py 참고.
+  min_auc: 0.93
+  min_recall_at_threshold: 0.85
+  min_val_video_groups: 30
+
+datasets:
+  train: [ffpp, celebdf, kodf]
+  test: [kodf, deeperforensics, self_check]
+  # k-face는 얼굴 유사도(ArcFace) 임계값 재보정용이라 이 목록에 없음 — 별도 트랙
