@@ -24,10 +24,11 @@ _VIDEO_SUFFIXES = {".mp4", ".mov"}
 def _load_frames(path: Path, *, frame_count: int) -> list[np.ndarray]:
     suffix = path.suffix.lower()
     if suffix in _IMAGE_SUFFIXES:
-        import cv2
+        # PIL로 읽는다(이미지 경로는 cv2 없이도 동작하게) — 영상 디코딩만 cv2가 꼭 필요하다.
+        from PIL import Image
 
-        frame = cv2.imread(str(path))
-        return [frame] if frame is not None else []
+        rgb = np.asarray(Image.open(path).convert("RGB"))
+        return [np.ascontiguousarray(rgb[..., ::-1])]  # RGB -> BGR
 
     if suffix in _VIDEO_SUFFIXES:
         total = count_frames(path)

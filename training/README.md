@@ -90,7 +90,7 @@ sha256sum services/faceguard-model-api/.models/deepfake/efficientnet_b4.onnx
 
 ```bash
 python -m pip install -r requirements-train-test.txt
-python -m unittest discover -s tests
+python -m unittest discover -s tests -t .
 ```
 
 `tests/test_smoke_pipeline.py`가 합성 데이터로 전체 체인(매니페스트→정렬(fake)→학습(2
