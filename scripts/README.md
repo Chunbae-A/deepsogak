@@ -26,9 +26,16 @@ cat data/inventory/55_inventory.md   # filekey 확인
 
 # 2. 필요한 파일만 선택 다운로드 (AI-Hub API 키 필요)
 AIHUB_API_KEY=발급받은키 ./scripts/aihub_download.sh 55 38522,38523
+
+# 3. 대용량 파일은 분할압축(파일명.zip.part1, .part2, ...)으로 내려오므로 병합
+./scripts/aihub_merge_zip_parts.sh data/raw/kodf
 ```
 
 **전체 2.8TB를 한 번에 받지 말 것** — `55_inventory.md`에서 필요한 filekey만 골라서 받는다.
+
+### Windows에서 분할압축 병합하기
+
+`aihub_merge_zip_parts.sh`는 `find`/`sort -V`/`xargs`/`cat`을 쓰는 일반 bash 스크립트다. **WSL 대신 Git Bash 사용을 권장**한다 — Git for Windows에 번들된 MSYS2 coreutils가 이 명령들을 그대로 지원하고, WSL2와 달리 NTFS 경로를 네이티브로 다뤄 대용량 파일에서 I/O 페널티(9p/virtiofs 변환 계층)가 없다. `aihubshell` 자체가 Git Bash에서 이상 동작하면 그때 WSL로 폴백한다.
 
 자세한 배경(용도별 지도, 라이선스, 확보 순서, 무엇이 자동화되고 무엇이 안 되는지)은
 [`../DATA_PLAN.md`](../DATA_PLAN.md) 참고.
