@@ -72,10 +72,11 @@ class _FakeRecognitionModel:
 class _FakeFaceApp:
     """항상 같은 얼굴 하나만 찾는(또는 얼굴을 못 찾는) 가짜 FaceAnalysis."""
 
-    def __init__(self, *, has_face: bool, image_size: int):
+    def __init__(self, *, has_face: bool, image_size: int, bbox: tuple[float, float, float, float] | None = None):
         self.has_face = has_face
         self.models = {"recognition": _FakeRecognitionModel()}
         self._landmark = _make_landmark(image_size)
+        self._bbox = bbox
 
     def get(self, bgr: np.ndarray):
         if not self.has_face:
@@ -86,7 +87,7 @@ class _FakeFaceApp:
         embedding = _fake_get_feat(aligned)
         embedding = embedding / (np.linalg.norm(embedding) + 1e-12)
         h, w = bgr.shape[:2]
-        bbox = np.array([0, 0, w, h], dtype=np.float32)
+        bbox = np.array(self._bbox if self._bbox is not None else (0, 0, w, h), dtype=np.float32)
         return [_FakeFace(bbox=bbox, kps=self._landmark, embedding=embedding)]
 
 
@@ -179,6 +180,46 @@ class ApplyDeepbaeksinTestCase(unittest.TestCase):
         self.assertEqual(meta["jpegQualityChecked"], 80)
         self.assertIsNotNone(meta["similarityAfterJpegRoundTrip"])
         self.assertLessEqual(meta["similarityAfterJpegRoundTrip"], 1.0)
+
+
+class BlockSearchRegionTestCase(unittest.TestCase):
+    def test_face_search_region_adds_margin_and_clamps_to_image(self):
+        bbox = np.array([60, 60, 84, 84], dtype=np.float32)
+        region = deepbaeksin._face_search_region(bbox, height=96, width=96, margin_ratio=0.5)
+        self.assertEqual(region, (48, 96, 48, 96))
+
+    def test_face_search_region_full_image_bbox_stays_full_image(self):
+        bbox = np.array([0, 0, 96, 96], dtype=np.float32)
+        region = deepbaeksin._face_search_region(bbox, height=96, width=96)
+        self.assertEqual(region, (0, 96, 0, 96))
+
+    def test_block_positions_stay_within_given_region(self):
+        positions = deepbaeksin._block_positions(top=48, bottom=96, left=48, right=96, block_size=24)
+        self.assertTrue(positions)
+        for top, bottom, left, right in positions:
+            self.assertGreaterEqual(top, 48)
+            self.assertLessEqual(bottom, 96)
+            self.assertGreaterEqual(left, 48)
+            self.assertLessEqual(right, 96)
+
+    def test_apply_deepbaeksin_never_modifies_pixels_outside_face_region(self):
+        """탐색이 효과를 찾든 못 찾든, 얼굴 영역(+마진) 밖 픽셀은 항상 원본 그대로여야 한다."""
+        size = 96
+        # 얼굴이 우하단 모서리에만 있다고 가정하면, 마진(50%)을 더해도 좌상단
+        # 48x48 영역은 탐색 범위 밖이다.
+        fake_app = _FakeFaceApp(has_face=True, image_size=size, bbox=(60, 60, 84, 84))
+        rng = np.random.default_rng(21)
+        noise = rng.integers(100, 160, size=(size, size, 3), dtype=np.uint8)
+        image = Image.fromarray(noise, mode="RGB")
+
+        with patch.object(deepbaeksin, "_get_face_apps", return_value={"fake_model": fake_app}):
+            protected, _ = deepbaeksin.apply_deepbaeksin(
+                image, max_iterations=200, block_size=24, time_budget_seconds=30.0, seed=1
+            )
+
+        original_array = np.asarray(image.convert("RGB"))
+        protected_array = np.asarray(protected)
+        self.assertTrue(np.array_equal(original_array[0:48, 0:48], protected_array[0:48, 0:48]))
 
 
 class TargetModelNamesTestCase(unittest.TestCase):
