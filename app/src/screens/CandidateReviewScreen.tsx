@@ -53,10 +53,23 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
     });
   };
 
-  const handleConfirm = (onlyId?: string) => {
-    if (!candidates) return;
+  const [isConfirming, setIsConfirming] = useState(false);
+
+  const handleConfirm = async (onlyId?: string) => {
+    if (!candidates || isConfirming) return;
     const keepIds = onlyId ? [onlyId] : candidates.filter((c) => !excludedIds.has(c.id)).map((c) => c.id);
-    confirmCandidateSelection(keepIds).catch(() => {});
+    setIsConfirming(true);
+    try {
+      // 확정(POST)이 서버 DB에 실제로 반영된 뒤에 다음 화면(신고서 초안)으로
+      // 넘어가야 한다. await 없이 바로 넘어가면 신고서 초안 화면이 confirm
+      // 반영 전에 GET /api/report/draft를 먼저 호출해, 방금 선택한 후보가
+      // 아니라 기본값(예시 데이터)이 표시되는 경합 상태가 생긴다.
+      await confirmCandidateSelection(keepIds);
+    } catch {
+      // 확정 요청이 실패해도 사용자가 다음 화면에서 다시 시도할 수 있도록 진행은 막지 않는다.
+    } finally {
+      setIsConfirming(false);
+    }
     onConfirmSelection();
   };
 
@@ -69,6 +82,7 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
           setSelectedCandidateId(null);
         }}
         onCreateReport={() => handleConfirm(selectedCandidateId)}
+        isSubmitting={isConfirming}
       />
     );
   }
@@ -136,7 +150,7 @@ export function CandidateReviewScreen({ onConfirmSelection }: { onConfirmSelecti
           </ScrollView>
 
           <View style={styles.bottomCta}>
-            <PrimaryButton label="선택 후보 상세 분석" onPress={() => handleConfirm()} />
+            <PrimaryButton label="선택 후보 상세 분석" onPress={() => handleConfirm()} disabled={isConfirming} />
           </View>
         </>
       )}
