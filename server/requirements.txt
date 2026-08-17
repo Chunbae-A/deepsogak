@@ -5,3 +5,7 @@ pillow
 imagehash
 requests
 python-dotenv
+numpy
+scikit-image
+onnxruntime
+insightface

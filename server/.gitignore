@@ -4,6 +4,7 @@ storage/saved/*
 !storage/uploads/.gitkeep
 !storage/protected/.gitkeep
 !storage/saved/.gitkeep
+storage/deepsogak.db
 __pycache__/
 *.pyc
 .env
