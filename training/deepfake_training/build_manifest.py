@@ -46,6 +46,7 @@ def build_manifest(
     *,
     val_fraction: float,
     seed: int,
+    raw_dir: Path | None = None,
 ) -> list[ManifestRow]:
     if dataset not in DATASET_ADAPTERS:
         raise ValueError(
@@ -53,7 +54,7 @@ def build_manifest(
         )
 
     adapter = DATASET_ADAPTERS[dataset]
-    raw_dir = data_root / "raw" / dataset
+    raw_dir = raw_dir if raw_dir is not None else data_root / "raw" / dataset
     samples = adapter.list_samples(raw_dir)
 
     if not samples:
@@ -93,6 +94,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--dataset", required=True, choices=sorted(DATASET_ADAPTERS))
     parser.add_argument("--config", type=Path, default=Path(__file__).parent.parent / "configs" / "default.yaml")
     parser.add_argument("--data-root", type=Path, default=None, help="config의 data_root를 덮어쓴다")
+    parser.add_argument(
+        "--raw-dir",
+        type=Path,
+        default=None,
+        help="원본 폴더를 data_root/raw/<dataset> 관례 대신 직접 지정한다 "
+        "(예: 외장 드라이브에 다른 구조로 받아둔 경우)",
+    )
     parser.add_argument("--val-fraction", type=float, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--out", type=Path, default=None)
@@ -108,7 +116,9 @@ def main(argv: list[str] | None = None) -> None:
     val_fraction = args.val_fraction if args.val_fraction is not None else config.train.val_fraction
     seed = args.seed if args.seed is not None else config.train.seed
 
-    rows = build_manifest(args.dataset, data_root, val_fraction=val_fraction, seed=seed)
+    rows = build_manifest(
+        args.dataset, data_root, val_fraction=val_fraction, seed=seed, raw_dir=args.raw_dir
+    )
     _print_summary(args.dataset, rows)
 
     if args.dry_run:

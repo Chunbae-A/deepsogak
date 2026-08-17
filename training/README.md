@@ -105,5 +105,15 @@ python -m deepfake_training.build_manifest --dataset ffpp --dry-run
 python -m deepfake_training.build_manifest --dataset celebdf --dry-run
 ```
 
+원본 데이터를 `data_root/raw/<dataset>` 관례가 아닌 다른 경로(예: 외장 드라이브)에 받아뒀다면
+`--raw-dir`로 직접 지정한다:
+
+```bash
+python -m deepfake_training.build_manifest --dataset ffpp --raw-dir /d/defake/ff --dry-run
+```
+
 `--dry-run`은 subject_id 추출 결과만 출력하고 아무것도 쓰지 않는다 — 실제 폴더 구조를 보고
 어댑터의 subject_id 규칙이 말이 되는지 사람이 먼저 확인하는 단계.
+
+**Windows 참고**: 콘솔 코드페이지 때문에 한글 출력이 깨지면 `PYTHONUTF8=1`을 앞에 붙여
+실행한다(`PYTHONUTF8=1 python -m deepfake_training.build_manifest ...`).
