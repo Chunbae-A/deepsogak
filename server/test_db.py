@@ -1,0 +1,135 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+import db
+
+
+class DbTestCase(unittest.TestCase):
+    def setUp(self):
+        # db._DB_PATH는 모듈 전역 상태라, 여기서 임시 파일로 바꾸면 같은
+        # 프로세스에서 나중에 실행되는 다른 테스트 모듈(test_main.py 등)에
+        # 그대로 새어나갈 수 있다. 원래 값을 저장해뒀다가 tearDown에서
+        # 되돌린다(unittest discover로 여러 파일을 한 번에 돌릴 때를 대비).
+        self._original_db_path = db._DB_PATH
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self._tmpdir.name) / "test.db"
+        db.init_db(self.db_path)
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+        db._DB_PATH = self._original_db_path
+
+    def test_create_and_get_job_round_trips_all_fields(self):
+        db.create_job(
+            "job1",
+            original_path=Path("/tmp/original.jpg"),
+            protected_path=Path("/tmp/protected.jpg"),
+            sha256="abc123",
+            phash="deadbeef",
+            created_at=1000.0,
+            deepbaeksin_applied=True,
+            deepbaeksin_meta={"reason": "ok", "similarityAfter": 0.9},
+        )
+        job = db.get_job("job1")
+        self.assertIsNotNone(job)
+        self.assertEqual(job["originalPath"], Path("/tmp/original.jpg"))
+        self.assertEqual(job["protectedPath"], Path("/tmp/protected.jpg"))
+        self.assertEqual(job["sha256"], "abc123")
+        self.assertEqual(job["phash"], "deadbeef")
+        self.assertEqual(job["createdAt"], 1000.0)
+        self.assertTrue(job["deepbaeksinApplied"])
+        self.assertEqual(job["deepbaeksinMeta"]["reason"], "ok")
+
+    def test_get_job_missing_returns_none(self):
+        self.assertIsNone(db.get_job("does-not-exist"))
+
+    def test_get_latest_job_returns_most_recent_by_created_at(self):
+        db.create_job(
+            "older", original_path=Path("a"), protected_path=Path("a"),
+            sha256="a", phash="a", created_at=100.0,
+        )
+        db.create_job(
+            "newer", original_path=Path("b"), protected_path=Path("b"),
+            sha256="b", phash="b", created_at=200.0,
+        )
+        latest = db.get_latest_job()
+        self.assertIsNotNone(latest)
+        job_id, job = latest
+        self.assertEqual(job_id, "newer")
+        self.assertEqual(job["sha256"], "b")
+
+    def test_get_latest_job_empty_returns_none(self):
+        self.assertIsNone(db.get_latest_job())
+
+    def test_count_jobs(self):
+        self.assertEqual(db.count_jobs(), 0)
+        db.create_job("a", original_path=Path("a"), protected_path=Path("a"), sha256="a", phash="a", created_at=1.0)
+        db.create_job("b", original_path=Path("b"), protected_path=Path("b"), sha256="b", phash="b", created_at=2.0)
+        self.assertEqual(db.count_jobs(), 2)
+
+    def test_manual_reports_preserve_insertion_order(self):
+        db.add_manual_report("https://example.com/1", created_at=1.0)
+        db.add_manual_report("https://example.com/2", created_at=2.0)
+        reports = db.list_manual_reports()
+        self.assertEqual([r["url"] for r in reports], [
+            "https://example.com/1",
+            "https://example.com/2",
+        ])
+
+    def test_scan_cache_missing_returns_none_then_set_and_get(self):
+        self.assertIsNone(db.get_scan_cache("job1"))
+        matches = [{"similarity": 90, "source_type": "검색엔진"}]
+        db.set_scan_cache("job1", matches)
+        self.assertEqual(db.get_scan_cache("job1"), matches)
+
+    def test_scan_cache_upsert_overwrites(self):
+        db.set_scan_cache("job1", [{"a": 1}])
+        db.set_scan_cache("job1", [{"a": 2}])
+        self.assertEqual(db.get_scan_cache("job1"), [{"a": 2}])
+
+    def test_confirmed_keep_ids_defaults_empty_and_round_trips(self):
+        self.assertEqual(db.get_confirmed_keep_ids(), [])
+        db.set_confirmed_keep_ids(["c1", "c3"])
+        self.assertEqual(db.get_confirmed_keep_ids(), ["c1", "c3"])
+
+    def test_draft_overrides_defaults_none_and_round_trips(self):
+        self.assertIsNone(db.get_draft_overrides())
+        fields = [{"key": "postUrl", "label": "게시물 URL", "value": "x"}]
+        db.set_draft_overrides(fields)
+        self.assertEqual(db.get_draft_overrides(), fields)
+        db.set_draft_overrides(None)
+        self.assertIsNone(db.get_draft_overrides())
+
+    def test_report_count_increments_and_persists(self):
+        self.assertEqual(db.get_report_count(), 0)
+        self.assertEqual(db.increment_report_count(), 1)
+        self.assertEqual(db.increment_report_count(), 2)
+        self.assertEqual(db.get_report_count(), 2)
+
+    def test_state_survives_reinit_on_same_file_path(self):
+        """서버 재시작을 흉내낸다: 같은 경로로 init_db를 다시 불러도 값이 남아있어야 한다."""
+        db.create_job("job1", original_path=Path("a"), protected_path=Path("a"), sha256="a", phash="a", created_at=1.0)
+        db.increment_report_count()
+
+        db.init_db(self.db_path)  # "재시작" — 같은 파일을 다시 연다
+
+        self.assertIsNotNone(db.get_job("job1"))
+        self.assertEqual(db.get_report_count(), 1)
+
+    def test_reset_all_clears_every_table(self):
+        db.create_job("job1", original_path=Path("a"), protected_path=Path("a"), sha256="a", phash="a", created_at=1.0)
+        db.add_manual_report("https://example.com", created_at=1.0)
+        db.set_confirmed_keep_ids(["c1"])
+        db.increment_report_count()
+
+        db.reset_all()
+
+        self.assertEqual(db.count_jobs(), 0)
+        self.assertEqual(db.list_manual_reports(), [])
+        self.assertEqual(db.get_confirmed_keep_ids(), [])
+        self.assertEqual(db.get_report_count(), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
