@@ -1,6 +1,0 @@
---index-url https://download.pytorch.org/whl/cpu
-torch==2.5.1
-torchvision==0.20.1
-
---index-url https://pypi.org/simple
--r requirements-train-base.txt
