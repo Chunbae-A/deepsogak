@@ -13,10 +13,12 @@ export function CandidateDetailScreen({
   candidateId,
   onExclude,
   onCreateReport,
+  isSubmitting,
 }: {
   candidateId: string;
   onExclude: () => void;
   onCreateReport: () => void;
+  isSubmitting?: boolean;
 }) {
   const [detail, setDetail] = useState<CandidateDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -117,8 +119,8 @@ export function CandidateDetailScreen({
           </ScrollView>
 
           <View style={styles.bottomCta}>
-            <SecondaryButton label="오탐으로 제외" onPress={onExclude} />
-            <PrimaryButton label="이 후보로 신고자료 만들기" onPress={onCreateReport} />
+            <SecondaryButton label="오탐으로 제외" onPress={onExclude} disabled={isSubmitting} />
+            <PrimaryButton label="이 후보로 신고자료 만들기" onPress={onCreateReport} disabled={isSubmitting} />
           </View>
         </>
       )}
