@@ -70,6 +70,15 @@ DEEPBAEKSIN_TARGET_MODELS=buffalo_l,buffalo_sc로 실제 두 모델을 동시에
 기본값은 단일 모델(buffalo_l)이라 이 트레이드오프는 명시적으로 옵트인한
 경우에만 적용된다.
 
+## 탐색 범위를 얼굴 주변으로 제한
+
+블록 탐색은 이미지 전체가 아니라 1차로 탐지한 얼굴의 bbox 주변(가로·세로
+여유 마진 50%, 이미지 경계로 clamp)으로 제한한다. 배경이 넓은 사진에서
+배경 블록을 바꿔봐야 얼굴 크롭 임베딩은 거의 움직이지 않아 대부분
+기각되는데, 예산이 정해진 탐색(max_iterations·time_budget_seconds)에서
+그런 블록에 예산을 쓰는 건 낭비다. 얼굴 주변으로만 좁히면 같은 예산이
+전부 "실제로 임베딩에 영향을 줄 가능성이 있는" 블록에 쓰인다.
+
 이 모듈은 InsightFace가 설치돼 있지 않거나 얼굴을 찾지 못하는 등 어떤
 이유로든 실패하면 예외를 던지지 않고 원본 이미지를 그대로 반환한다 —
 "딥백신이 됐다고 거짓으로 표시하지 않는다"는 원칙에 따라, 실패 사유는
@@ -216,14 +225,35 @@ def _jpeg_round_trip(rgb_uint8: np.ndarray, quality: int) -> np.ndarray:
     return np.asarray(Image.open(buffer).convert("RGB"), dtype=np.uint8)
 
 
-def _block_positions(height: int, width: int, block_size: int) -> list[tuple[int, int, int, int]]:
-    rows = max(1, height // block_size)
-    cols = max(1, width // block_size)
+def _block_positions(top: int, bottom: int, left: int, right: int, block_size: int) -> list[tuple[int, int, int, int]]:
+    rows = max(1, (bottom - top) // block_size)
+    cols = max(1, (right - left) // block_size)
     return [
-        (r * block_size, min((r + 1) * block_size, height), c * block_size, min((c + 1) * block_size, width))
+        (
+            top + r * block_size, min(top + (r + 1) * block_size, bottom),
+            left + c * block_size, min(left + (c + 1) * block_size, right),
+        )
         for r in range(rows)
         for c in range(cols)
     ]
+
+
+def _face_search_region(
+    bbox: np.ndarray, height: int, width: int, margin_ratio: float = 0.5
+) -> tuple[int, int, int, int]:
+    """탐지된 얼굴 bbox 주변으로 여유 마진을 준 탐색 영역을 이미지 경계 안으로 제한해 돌려준다.
+
+    배경 블록은 바꿔도 얼굴 크롭 임베딩에 거의 영향을 주지 않아 대부분
+    기각되므로, 탐색 예산을 전체 이미지가 아니라 얼굴 주변에 집중시키면
+    같은 예산으로 더 큰 유사도 하락을 기대할 수 있다.
+    """
+    x1, y1, x2, y2 = bbox
+    face_w, face_h = x2 - x1, y2 - y1
+    top = max(0, int(y1 - face_h * margin_ratio))
+    bottom = min(height, int(y2 + face_h * margin_ratio))
+    left = max(0, int(x1 - face_w * margin_ratio))
+    right = min(width, int(x2 + face_w * margin_ratio))
+    return top, bottom, left, right
 
 
 def apply_deepbaeksin(
@@ -311,7 +341,10 @@ def apply_deepbaeksin(
         return sum(per_model.values()) / len(per_model), per_model
 
     rng = np.random.default_rng(seed)
-    block_positions = _block_positions(height, width, block_size)
+    region_top, region_bottom, region_left, region_right = _face_search_region(
+        primary_face.bbox, height, width
+    )
+    block_positions = _block_positions(region_top, region_bottom, region_left, region_right, block_size)
     rng.shuffle(block_positions)
 
     delta = np.zeros_like(original, dtype=np.float32)
