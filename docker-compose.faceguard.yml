@@ -1,0 +1,43 @@
+services:
+  faceguard-model-api:
+    build:
+      context: ./services/faceguard-model-api
+    ports:
+      - "127.0.0.1:8001:8000"
+    environment:
+      FACEGUARD_ACCEPT_NONCOMMERCIAL_MODEL_LICENSE: "${FACEGUARD_ACCEPT_NONCOMMERCIAL_MODEL_LICENSE:-false}"
+      FACEGUARD_DEVICE: "${FACEGUARD_DEVICE:-cpu}"
+      FACEGUARD_MODEL_ROOT: /models/insightface
+      FACEGUARD_THRESHOLD_STATUS: "${FACEGUARD_THRESHOLD_STATUS:-research_only_unapproved}"
+      FACEGUARD_RETRIEVAL_SIMILARITY_THRESHOLD: "${FACEGUARD_RETRIEVAL_SIMILARITY_THRESHOLD:-0.20}"
+      FACEGUARD_DEEPFAKE_MODEL_PATH: /models/deepfake/efficientnet_b4.onnx
+      FACEGUARD_DEEPFAKE_CALIBRATION_PATH: /models/deepfake/deepfake_video_calibration.json
+      FACEGUARD_DEEPFAKE_MODEL_SHA256: "${FACEGUARD_DEEPFAKE_MODEL_SHA256:-c32a8532e2e1bd275b833b16460946eb307207098e0c07e2247851b71c23a6f1}"
+      FACEGUARD_DEEPFAKE_DEVICE: "${FACEGUARD_DEEPFAKE_DEVICE:-cpu}"
+      FACEGUARD_DEEPFAKE_THRESHOLD: "${FACEGUARD_DEEPFAKE_THRESHOLD:-0.7519882693886758}"
+      FACEGUARD_DEEPFAKE_THRESHOLD_STATUS: "${FACEGUARD_DEEPFAKE_THRESHOLD_STATUS:-research_only_single_image_unvalidated}"
+      FACEGUARD_DEEPFAKE_VIDEO_THRESHOLD_STATUS: "${FACEGUARD_DEEPFAKE_VIDEO_THRESHOLD_STATUS:-research_only_unapproved}"
+    volumes:
+      - faceguard-insightface-models:/models/insightface
+      - ./services/faceguard-model-api/.models/deepfake:/models/deepfake:ro
+    restart: unless-stopped
+
+  server:
+    build:
+      context: ./server
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      GOOGLE_VISION_API_KEY: "${GOOGLE_VISION_API_KEY:-}"
+      FACEGUARD_MODEL_API_URL: http://faceguard-model-api:8000
+      FACEGUARD_MODEL_API_TIMEOUT_SECONDS: "${FACEGUARD_MODEL_API_TIMEOUT_SECONDS:-30}"
+    depends_on:
+      faceguard-model-api:
+        condition: service_healthy
+    volumes:
+      - faceguard-server-storage:/app/storage
+    restart: unless-stopped
+
+volumes:
+  faceguard-insightface-models:
+  faceguard-server-storage:
