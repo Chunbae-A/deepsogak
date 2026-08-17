@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     deepbaeksin_meta TEXT,
     status TEXT NOT NULL DEFAULT 'completed',
     error_reason TEXT,
-    owner_id TEXT
+    owner_id TEXT,
+    files_pruned INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS manual_reports (
@@ -84,6 +85,8 @@ def _migrate_add_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE jobs ADD COLUMN error_reason TEXT")
     if "owner_id" not in existing:
         conn.execute("ALTER TABLE jobs ADD COLUMN owner_id TEXT")
+    if "files_pruned" not in existing:
+        conn.execute("ALTER TABLE jobs ADD COLUMN files_pruned INTEGER NOT NULL DEFAULT 0")
 
 
 def _require_path() -> Path:
@@ -224,6 +227,7 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "status": row["status"],
         "errorReason": row["error_reason"],
         "ownerId": row["owner_id"],
+        "filesPruned": bool(row["files_pruned"]),
     }
 
 
@@ -272,6 +276,40 @@ def count_completed_jobs() -> int:
             "SELECT COUNT(*) FROM jobs WHERE status = 'completed'"
         ).fetchone()
     return count
+
+
+def list_prunable_jobs(
+    *, exclude_job_id: str, older_than_seconds: float, now: float
+) -> list[dict[str, Any]]:
+    """디스크에서 원본·보호사진 파일을 정리해도 되는 job 후보를 찾는다(#78).
+
+    DB 행 자체는 지우지 않는다 — count_completed_jobs()가 홈 화면
+    protectedCount 통계에 그대로 쓰이고 있어서, 행을 지우면 그 누적
+    카운트가 깨진다(#78 코멘트 참고). 여기서는 "파일만 지워도 되는 job"의
+    목록만 돌려주고, 실제 파일 삭제는 main.py 쪽에서(디스크 I/O는 db.py
+    책임이 아니므로) 한다.
+
+    exclude_job_id로 넘긴 job(보통 방금 완료된 최신 job)은 절대 후보에
+    포함하지 않는다 — 얼굴가드 순찰(get_latest_completed_job)이 그 파일을
+    쓰고 있을 수 있다. already files_pruned=1인 job도 다시 시도하지 않게
+    제외한다.
+    """
+    cutoff = now - older_than_seconds
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM jobs
+            WHERE id != ? AND files_pruned = 0 AND created_at < ?
+              AND status IN ('completed', 'failed')
+            """,
+            (exclude_job_id, cutoff),
+        ).fetchall()
+    return [dict(_row_to_job(row), id=row["id"]) for row in rows]
+
+
+def mark_files_pruned(job_id: str) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE jobs SET files_pruned = 1 WHERE id = ?", (job_id,))
 
 
 # ---------------------------------------------------------------------------

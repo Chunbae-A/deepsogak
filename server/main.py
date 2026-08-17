@@ -73,6 +73,41 @@ app.mount("/static", StaticFiles(directory=STORAGE_DIR), name="static")
 FACEGUARD_SCANS: dict[str, dict] = {}
 
 
+# #78 스캐폴딩: "가장 최근 완료 job 이외의 파일"을 얼마나 오래 남겨둘지.
+# 기본값 7일은 보수적인 시작값일 뿐 — 데모 기간(8/21까지)에는 사실상
+# 영향이 없도록 일부러 넉넉하게 잡았다. 실제 서비스에서 얼마나 짧게
+# 잡을지는 #78에서 논의해 정할 제품 결정이다.
+JOB_FILE_RETENTION_SECONDS = float(os.environ.get("JOB_FILE_RETENTION_SECONDS", 7 * 24 * 3600))
+
+
+def _prune_old_job_files(keep_job_id: str) -> None:
+    """keep_job_id(방금 완료된 job) 이외의, 정리 대상 job 파일을 지운다(#78).
+
+    DB 행(sha256/phash/생성시각 등)은 절대 지우지 않는다 — protectedCount
+    같은 누적 통계가 job 행 개수에 의존하고 있어서, 행을 지우면 그 통계가
+    깨진다. 여기서는 디스크의 원본·보호사진 파일만 지우고, 지운 job은
+    files_pruned=1로 표시해 다음에 다시 시도하지 않게 한다.
+
+    saved/ 폴더(사용자가 명시적으로 "저장"을 눌러 만든 사본)는 건드리지
+    않는다 — 그건 자동 정리 대상이 아니라 사용자의 의도적인 보관이다.
+    """
+    prunable = db.list_prunable_jobs(
+        exclude_job_id=keep_job_id,
+        older_than_seconds=JOB_FILE_RETENTION_SECONDS,
+        now=time.time(),
+    )
+    for job in prunable:
+        for path in (job["originalPath"], job["protectedPath"]):
+            if path is None:
+                continue
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                logger.exception("job 파일 정리 실패 (jobId=%s, path=%s)", job["id"], path)
+                continue
+        db.mark_files_pruned(job["id"])
+
+
 def _run_protection_job(job_id: str, raw: bytes, image_format: str, original_path: Path, protected_path: Path) -> None:
     # BackgroundTasks가 스레드풀에서 돌리는 동기 함수: 딥백신(최대 12초x모델수)이
     # 이벤트 루프를 막지 않게 하려고 /api/protection/process에서 분리했다.
@@ -102,6 +137,7 @@ def _run_protection_job(job_id: str, raw: bytes, image_format: str, original_pat
             deepbaeksin_applied=deepbaeksin_meta["applied"],
             deepbaeksin_meta=deepbaeksin_meta,
         )
+        _prune_old_job_files(keep_job_id=job_id)
     except Exception:
         logger.exception("보호사진 처리 실패 (jobId=%s)", job_id)
         db.fail_job(job_id, reason="이미지 처리 중 오류가 발생했습니다.")
@@ -183,6 +219,10 @@ def get_protection_result(jobId: str):
         "protectedPhotoUrl": f"/static/protected/{job['protectedPath'].name}",
         "sha256": job["sha256"],
         "phash": job["phash"],
+        # #78: 이 job이 "최신"이 아니게 된 뒤 파일이 정리됐으면 위 photoUrl들은
+        # 더 이상 유효하지 않다(404). 화면에서 "만료된 결과" 안내가 필요하면
+        # 이 값으로 분기할 수 있다.
+        "filesPruned": job["filesPruned"],
         "appliedChecks": [
             _deepbaeksin_check_message(deepbaeksin_meta),
             "불필요한 위치정보 제거 완료",

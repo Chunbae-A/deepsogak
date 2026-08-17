@@ -88,6 +88,33 @@ class ServerEndpointsTestCase(unittest.TestCase):
         response = self.client.get("/api/protection/result", params={"jobId": "missing"})
         self.assertEqual(response.status_code, 404)
 
+    def test_completing_new_job_prunes_old_job_files_but_keeps_db_row(self):
+        # #78 스캐폴딩: "최신"이 아니게 된 오래된 job의 파일만 지워지고,
+        # DB 행(=protectedCount 같은 누적 통계의 근거)은 남아있어야 한다.
+        old_original = main.UPLOADS_DIR / "old_original.jpg"
+        old_protected = main.PROTECTED_DIR / "old_protected.jpg"
+        old_original.write_bytes(b"old-original")
+        old_protected.write_bytes(b"old-protected")
+        db.create_job(
+            "old-job",
+            original_path=old_original,
+            protected_path=old_protected,
+            sha256="old-sha",
+            phash="old-phash",
+            created_at=0.0,  # 아주 오래전
+        )
+
+        with patch.object(main, "JOB_FILE_RETENTION_SECONDS", 1.0):
+            self._upload()  # 새 job 완료 → old-job은 정리 대상이 됨
+
+        self.assertFalse(old_original.exists())
+        self.assertFalse(old_protected.exists())
+
+        old_job = db.get_job("old-job")
+        self.assertIsNotNone(old_job)  # DB 행은 유지
+        self.assertTrue(old_job["filesPruned"])
+        self.assertEqual(db.count_completed_jobs(), 2)  # old-job + 방금 완료된 job
+
     def test_home_summary_counts_persist_across_requests(self):
         self._upload()
         self._upload()
