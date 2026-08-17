@@ -1,0 +1,614 @@
+[
+  {
+    "category": "003.딥페이크/2.Validation/원천데이터/validate_탐지방해/원본영상",
+    "name": "02_validate.zip",
+    "size": "32 GB",
+    "filekey": "38533"
+  },
+  {
+    "category": "003.딥페이크/2.Validation/원천데이터/validate_탐지방해/원본영상",
+    "name": "03_validate.zip",
+    "size": "33 GB",
+    "filekey": "38534"
+  },
+  {
+    "category": "003.딥페이크/2.Validation/원천데이터/validate_탐지방해/원본영상",
+    "name": "01_validate.zip",
+    "size": "34 GB",
+    "filekey": "38532"
+  },
+  {
+    "category": "003.딥페이크/2.Validation/원천데이터/validate_탐지방해/변조영상",
+    "name": "01_validate_탐지방해.zip",
+    "size": "23 GB",
+    "filekey": "38530"
+  },
+  {
+    "category": "003.딥페이크/2.Validation/원천데이터/validate_탐지방해/변조영상",
+    "name": "02_validate_탐지방해.zip",
+    "size": "27 GB",
+    "filekey": "38531"
+  },
+  {
+    "category": "003.딥페이크/2.Validation/원천데이터/validate_변조",
+    "name": "vaild_audio_data.zip",
+    "size": "12 GB",
+    "filekey": "38523"
+  },
+  {
+    "category": "003.딥페이크/2.Validation/원천데이터/validate_변조",
+    "name": "vaild_dffs_data.zip",
+    "size": "17 GB",
+    "filekey": "38524"
+  },
+  {
+    "category": "003.딥페이크/2.Validation/원천데이터/validate_변조",
+    "name": "vaild_dfl_data.zip",
+    "size": "18 GB",
+    "filekey": "38525"
+  },
+  {
+    "category": "003.딥페이크/2.Validation/원천데이터/validate_변조",
+    "name": "vaild_fo_data.zip",
+    "size": "35 GB",
+    "filekey": "38526"
+  },
+  {
+    "category": "003.딥페이크/2.Validation/원천데이터/validate_변조",
+    "name": "vaild_fsgan_data.zip",
+    "size": "19 GB",
+    "filekey": "38527"
+  },
+  {
+    "category": "003.딥페이크/2.Validation/원천데이터/validate_원본",
+    "name": "원본1.zip",
+    "size": "29 GB",
+    "filekey": "38528"
+  },
+  {
+    "category": "003.딥페이크/2.Validation/원천데이터/validate_원본",
+    "name": "원본2.zip",
+    "size": "30 GB",
+    "filekey": "38529"
+  },
+  {
+    "category": "003.딥페이크/2.Validation/라벨링데이터",
+    "name": "validate_meta.zip",
+    "size": "113 KB",
+    "filekey": "38522"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/변조영상",
+    "name": "08_변조영상.zip",
+    "size": "28 GB",
+    "filekey": "38486"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/변조영상",
+    "name": "09_변조영상.zip",
+    "size": "30 GB",
+    "filekey": "38487"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/변조영상",
+    "name": "10_변조영상.zip",
+    "size": "28 GB",
+    "filekey": "38488"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/변조영상",
+    "name": "11_변조영상.zip",
+    "size": "30 GB",
+    "filekey": "38489"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/변조영상",
+    "name": "12_변조영상.zip",
+    "size": "29 GB",
+    "filekey": "38490"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/변조영상",
+    "name": "13_변조영상.zip",
+    "size": "30 GB",
+    "filekey": "38491"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/변조영상",
+    "name": "14_변조영상.zip",
+    "size": "30 GB",
+    "filekey": "38492"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/변조영상",
+    "name": "01_변조영상.zip",
+    "size": "28 GB",
+    "filekey": "38479"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/변조영상",
+    "name": "02_변조영상.zip",
+    "size": "30 GB",
+    "filekey": "38480"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/변조영상",
+    "name": "03_변조영상.zip",
+    "size": "32 GB",
+    "filekey": "38481"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/변조영상",
+    "name": "04_변조영상.zip",
+    "size": "30 GB",
+    "filekey": "38482"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/변조영상",
+    "name": "05_변조영상.zip",
+    "size": "28 GB",
+    "filekey": "38483"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/변조영상",
+    "name": "06_변조영상.zip",
+    "size": "30 GB",
+    "filekey": "38484"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/변조영상",
+    "name": "07_변조영상.zip",
+    "size": "28 GB",
+    "filekey": "38485"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "01_원본영상.zip",
+    "size": "32 GB",
+    "filekey": "38493"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "02_원본영상.zip",
+    "size": "31 GB",
+    "filekey": "38494"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "03_원본영상.zip",
+    "size": "33 GB",
+    "filekey": "38495"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "04_원본영상.zip",
+    "size": "31 GB",
+    "filekey": "38498"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "05_원본영상.zip",
+    "size": "34 GB",
+    "filekey": "38499"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "06_원본영상.zip",
+    "size": "31 GB",
+    "filekey": "38500"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "07_원본영상.zip",
+    "size": "34 GB",
+    "filekey": "38501"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "08_원본영상.zip",
+    "size": "27 GB",
+    "filekey": "38502"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "09_원본영상.zip",
+    "size": "32 GB",
+    "filekey": "38503"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "10_원본영상.zip",
+    "size": "34 GB",
+    "filekey": "38504"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "11_원본영상.zip",
+    "size": "34 GB",
+    "filekey": "38505"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "12_원본영상.zip",
+    "size": "32 GB",
+    "filekey": "38506"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "13_원본영상.zip",
+    "size": "30 GB",
+    "filekey": "38507"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "14_원본영상.zip",
+    "size": "31 GB",
+    "filekey": "38508"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "15_원본영상.zip",
+    "size": "30 GB",
+    "filekey": "38509"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "16_원본영상.zip",
+    "size": "32 GB",
+    "filekey": "38510"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "17_원본영상.zip",
+    "size": "33 GB",
+    "filekey": "38511"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "18_원본영상.zip",
+    "size": "31 GB",
+    "filekey": "38512"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "19_원본영상.zip",
+    "size": "29 GB",
+    "filekey": "38513"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "20_원본영상.zip",
+    "size": "33 GB",
+    "filekey": "38514"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "21_원본영상.zip",
+    "size": "30 GB",
+    "filekey": "38515"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "22_원본영상.zip",
+    "size": "33 GB",
+    "filekey": "38516"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "23_원본영상.zip",
+    "size": "29 GB",
+    "filekey": "38517"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "24_원본영상.zip",
+    "size": "30 GB",
+    "filekey": "38518"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "25_원본영상.zip",
+    "size": "30 GB",
+    "filekey": "38519"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "26_원본영상.zip",
+    "size": "22 GB",
+    "filekey": "38520"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_탐지방해/원본영상",
+    "name": "27_원본영상.zip",
+    "size": "24 GB",
+    "filekey": "38521"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_dfl5_data.zip",
+    "size": "28 GB",
+    "filekey": "38446"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_dfl6_data.zip",
+    "size": "10 GB",
+    "filekey": "38447"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fo1_data.zip",
+    "size": "30 GB",
+    "filekey": "38448"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fo2_data.zip",
+    "size": "28 GB",
+    "filekey": "38449"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fo3_data.zip",
+    "size": "29 GB",
+    "filekey": "38450"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fo4_data.zip",
+    "size": "30 GB",
+    "filekey": "38451"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fo5_data.zip",
+    "size": "30 GB",
+    "filekey": "38452"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fo6_data.zip",
+    "size": "30 GB",
+    "filekey": "38453"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fo7_data.zip",
+    "size": "31 GB",
+    "filekey": "38454"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fo8_data.zip",
+    "size": "28 GB",
+    "filekey": "38455"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fo9_data.zip",
+    "size": "24 GB",
+    "filekey": "38456"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fo10_data.zip",
+    "size": "28 GB",
+    "filekey": "38457"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fsgan1_data.zip",
+    "size": "30 GB",
+    "filekey": "38458"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fsgan2_data.zip",
+    "size": "29 GB",
+    "filekey": "38459"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fsgan3_data.zip",
+    "size": "30 GB",
+    "filekey": "38460"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fsgan4_data.zip",
+    "size": "26 GB",
+    "filekey": "38461"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_fsgan5_data.zip",
+    "size": "11 GB",
+    "filekey": "38462"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_dffs5_data.zip",
+    "size": "15 GB",
+    "filekey": "38353"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_dffs6_data.zip",
+    "size": "20 GB",
+    "filekey": "38354"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_dfl1_data.zip",
+    "size": "28 GB",
+    "filekey": "38355"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_dfl2_data.zip",
+    "size": "30 GB",
+    "filekey": "38356"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_dfl3_data.zip",
+    "size": "31 GB",
+    "filekey": "38357"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_dfl4_data.zip",
+    "size": "32 GB",
+    "filekey": "38358"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "audio_driven3.zip",
+    "size": "27 GB",
+    "filekey": "38347"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "audio_driven4.zip",
+    "size": "6 GB",
+    "filekey": "38348"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_dffs1_data.zip",
+    "size": "26 GB",
+    "filekey": "38349"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_dffs2_data.zip",
+    "size": "26 GB",
+    "filekey": "38350"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_dffs3_data.zip",
+    "size": "27 GB",
+    "filekey": "38351"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "train_dffs4_data.zip",
+    "size": "26 GB",
+    "filekey": "38352"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "audio_driven2.zip",
+    "size": "27 GB",
+    "filekey": "38346"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_변조",
+    "name": "audio_driven1.zip",
+    "size": "26 GB",
+    "filekey": "38345"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본1.zip",
+    "size": "28 GB",
+    "filekey": "38463"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본2.zip",
+    "size": "21 GB",
+    "filekey": "38464"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본3.zip",
+    "size": "29 GB",
+    "filekey": "38465"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본4.zip",
+    "size": "29 GB",
+    "filekey": "38466"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본5.zip",
+    "size": "29 GB",
+    "filekey": "38467"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본6.zip",
+    "size": "28 GB",
+    "filekey": "38468"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본7.zip",
+    "size": "26 GB",
+    "filekey": "38469"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본8.zip",
+    "size": "29 GB",
+    "filekey": "38470"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본9.zip",
+    "size": "28 GB",
+    "filekey": "38471"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본10.zip",
+    "size": "28 GB",
+    "filekey": "38472"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본11.zip",
+    "size": "30 GB",
+    "filekey": "38473"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본12.zip",
+    "size": "29 GB",
+    "filekey": "38474"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본13.zip",
+    "size": "29 GB",
+    "filekey": "38475"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본14.zip",
+    "size": "29 GB",
+    "filekey": "38476"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본15.zip",
+    "size": "29 GB",
+    "filekey": "38477"
+  },
+  {
+    "category": "003.딥페이크/1.Training/원천데이터/train_원본",
+    "name": "원본16.zip",
+    "size": "28 GB",
+    "filekey": "38478"
+  },
+  {
+    "category": "003.딥페이크/1.Training/라벨링데이터",
+    "name": "train_meta.zip",
+    "size": "946 KB",
+    "filekey": "38344"
+  }
+]
