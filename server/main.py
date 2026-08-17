@@ -32,12 +32,16 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 안전 업로드 화면 안내(최대 20M
 ALLOWED_FORMATS = {"JPEG", "PNG"}
 
 BASE_DIR = Path(__file__).parent
+# STORAGE_DIR 전체가 /static으로 그대로 서빙된다(아래 app.mount 참고). DB
+# 파일을 이 트리 안에 두면 인증 없이 그대로 다운로드된다(#75) — 반드시
+# 정적 서빙 경로 밖의 별도 DATA_DIR에 둔다.
 STORAGE_DIR = BASE_DIR / "storage"
 UPLOADS_DIR = STORAGE_DIR / "uploads"
 PROTECTED_DIR = STORAGE_DIR / "protected"
 SAVED_DIR = STORAGE_DIR / "saved"
-DB_PATH = STORAGE_DIR / "deepsogak.db"
-for d in (UPLOADS_DIR, PROTECTED_DIR, SAVED_DIR):
+DATA_DIR = BASE_DIR / "data"
+DB_PATH = DATA_DIR / "deepsogak.db"
+for d in (UPLOADS_DIR, PROTECTED_DIR, SAVED_DIR, DATA_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
 db.init_db(DB_PATH)

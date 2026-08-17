@@ -10,7 +10,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir -r requirements.txt
 
 COPY main.py model_api.py vision_scan.py ./
-RUN mkdir -p storage/uploads storage/protected storage/saved \
+RUN mkdir -p storage/uploads storage/protected storage/saved data \
     && useradd --create-home --uid 10001 deepsogak \
     && chown -R deepsogak:deepsogak /app
 

@@ -125,6 +125,16 @@ class ServerEndpointsTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_db_file_is_not_reachable_through_static_mount(self):
+        # 회귀 방지(#75): DB 파일이 /static(=STORAGE_DIR) 트리 밖에 있어야
+        # "SQLite format 3" 헤더를 그대로 내려주는 취약점이 재발하지 않는다.
+        response = self.client.get("/static/deepsogak.db")
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(
+            str(main.DB_PATH.resolve()).startswith(str(main.STORAGE_DIR.resolve()) + "/"),
+            "DB_PATH가 STORAGE_DIR 안에 있으면 /static으로 그대로 노출된다",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

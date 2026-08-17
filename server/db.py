@@ -2,8 +2,10 @@
 
 이전에는 프로토타입 인메모리 dict/list(JOBS, _manual_reports, _confirmed_keep_ids,
 _draft_overrides, REPORT_COUNT, _scan_cache)에만 상태를 두어 서버를 재시작하면
-전부 사라졌다. 이 모듈은 같은 데이터를 SQLite 파일(storage/deepsogak.db)에
-저장해 재시작·다른 프로세스 간에도 유지되도록 한다.
+전부 사라졌다. 이 모듈은 같은 데이터를 SQLite 파일(data/deepsogak.db)에
+저장해 재시작·다른 프로세스 간에도 유지되도록 한다. DB 파일은 반드시
+/static으로 서빙되는 storage/ 트리 밖에 둔다 — 안에 두면 인증 없이
+그대로 다운로드된다(#75).
 
 설계 원칙:
 - 팀 규모·해커톤 프로토타입 단계에 맞춰 별도 DB 서버 없이 표준 라이브러리
@@ -71,7 +73,7 @@ def _migrate_add_columns(conn: sqlite3.Connection) -> None:
     """비동기 처리(status/error_reason 컬럼)를 추가하기 전에 만들어진 DB 파일도
     계속 쓸 수 있도록, 없는 컬럼만 추가한다. protected_path/sha256/phash의
     NOT NULL 제약까지는 옮기지 않는다 — 이 저장소는 아직 실사용 데이터가 없는
-    프로토타입이라, 그 정도로 오래된 DB 파일은 storage/deepsogak.db를 지우고
+    프로토타입이라, 그 정도로 오래된 DB 파일은 data/deepsogak.db를 지우고
     새로 시작하는 편이 이 마이그레이션 코드를 유지하는 것보다 간단하다.
     """
     existing = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)")}
