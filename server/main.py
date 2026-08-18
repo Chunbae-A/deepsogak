@@ -90,6 +90,10 @@ def _prune_old_job_files(keep_job_id: str) -> None:
 
     saved/ 폴더(사용자가 명시적으로 "저장"을 눌러 만든 사본)는 건드리지
     않는다 — 그건 자동 정리 대상이 아니라 사용자의 의도적인 보관이다.
+
+    파일 하나라도 삭제에 실패하면(파일 잠금 등) 그 job은 files_pruned로
+    표시하지 않는다 — 잘못 표시하면 다음 정리 시도에서 영구히 건너뛰게 되어,
+    원본 셀카가 삭제되지 않은 채 디스크에 조용히 남게 된다.
     """
     prunable = db.list_prunable_jobs(
         exclude_job_id=keep_job_id,
@@ -97,6 +101,7 @@ def _prune_old_job_files(keep_job_id: str) -> None:
         now=time.time(),
     )
     for job in prunable:
+        all_deleted = True
         for path in (job["originalPath"], job["protectedPath"]):
             if path is None:
                 continue
@@ -104,8 +109,9 @@ def _prune_old_job_files(keep_job_id: str) -> None:
                 path.unlink(missing_ok=True)
             except OSError:
                 logger.exception("job 파일 정리 실패 (jobId=%s, path=%s)", job["id"], path)
-                continue
-        db.mark_files_pruned(job["id"])
+                all_deleted = False
+        if all_deleted:
+            db.mark_files_pruned(job["id"])
 
 
 def _run_protection_job(job_id: str, raw: bytes, image_format: str, original_path: Path, protected_path: Path) -> None:

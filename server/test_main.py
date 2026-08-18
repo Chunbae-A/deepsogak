@@ -9,6 +9,7 @@ main.deepbaeksin.apply_deepbaeksin을 빠른 가짜로 바꿔서 "엔드포인�
 
 import io
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -130,6 +131,40 @@ class ServerEndpointsTestCase(unittest.TestCase):
         self.assertIsNotNone(old_job)  # DB 행은 유지
         self.assertTrue(old_job["filesPruned"])
         self.assertEqual(db.count_completed_jobs(), 2)  # old-job + 방금 완료된 job
+
+    def test_prune_partial_failure_does_not_mark_job_as_pruned(self):
+        # 파일 하나만 삭제에 실패해도(파일 잠금 등) files_pruned를 True로
+        # 잘못 표시하면, 다음 정리 시도에서 영구히 건너뛰게 되어 원본 셀카가
+        # 삭제 안 된 채 디스크에 조용히 남는다.
+        locked_original = main.UPLOADS_DIR / "locked_original.jpg"
+        locked_protected = main.PROTECTED_DIR / "locked_protected.jpg"
+        locked_original.write_bytes(b"old-original")
+        locked_protected.write_bytes(b"old-protected")
+        db.create_job(
+            "locked-job",
+            original_path=locked_original,
+            protected_path=locked_protected,
+            sha256="locked-sha",
+            phash="locked-phash",
+            created_at=0.0,
+        )
+
+        real_unlink = Path.unlink
+
+        def flaky_unlink(path_self, *args, **kwargs):
+            if path_self == locked_protected:
+                raise OSError("simulated file lock")
+            return real_unlink(path_self, *args, **kwargs)
+
+        with patch.object(main, "JOB_FILE_RETENTION_SECONDS", 1.0), \
+                patch.object(Path, "unlink", flaky_unlink):
+            self._upload()
+
+        self.assertFalse(locked_original.exists())  # 이건 정상적으로 지워짐
+        self.assertTrue(locked_protected.exists())  # 이건 실패해서 남아있어야 함
+
+        locked_job = db.get_job("locked-job")
+        self.assertFalse(locked_job["filesPruned"])  # 잘못 표시되면 다음 정리에서 영영 건너뜀
 
     def test_result_for_pruned_job_reports_expired_instead_of_broken_photo_urls(self):
         # filesPruned=True인 job은 photoUrl을 내려주면 화면에서 깨진 이미지로
