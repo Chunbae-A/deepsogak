@@ -306,6 +306,29 @@ class MonitoringBridgeTests(unittest.TestCase):
         self.assertEqual(body["totalCandidates"], 0)
         self.assertEqual(body["lastCheckedAt"], "아직 보호사진 없음")
 
+    @patch("main.model_api.get_exposure_scan")
+    @patch("main.model_api.start_candidate_scan")
+    @patch("main.model_api.create_face_enrollment")
+    @patch("main.vision_scan.discover_web_candidates")
+    def test_model_api_failed_status_reports_error_not_stuck_scanning(
+        self, discover, enroll, start_scan, get_scan
+    ) -> None:
+        """모델 API가 스캔을 status="failed"로 종결해도 "scanning"에 영원히
+        머무르면 안 된다(FINAL_SCAN_STATUSES에 completed·partial_failed 외에
+        failed도 있음 — services/faceguard-model-api/faceguard_api/exposure.py)."""
+        discover.return_value = self._mock_discovery()
+        enroll.return_value = {"enrollment_id": "enrollment-1"}
+        start_scan.return_value = {"scan_id": "scan-1", "status": "queued"}
+        get_scan.return_value = {"status": "failed", "progress_percent": 0, "progress": {}}
+
+        response = self.client.get("/api/monitoring/summary")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["lastCheckedAt"], "확인 실패 — 잠시 후 다시 시도해 주세요")
+        # 실패한 스캔 매핑은 지워져서 다음 요청은 새 스캔을 다시 시도할 수 있어야 한다.
+        self.assertNotIn("job-1", main.MONITORING_SCAN_BY_JOB)
+
 
 if __name__ == "__main__":
     unittest.main()
