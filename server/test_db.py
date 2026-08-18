@@ -110,6 +110,31 @@ class DbTestCase(unittest.TestCase):
         db.create_job("b", original_path=Path("b"), protected_path=Path("b"), sha256="b", phash="b", created_at=2.0)
         self.assertEqual(db.count_completed_jobs(), 2)
 
+    def test_list_prunable_jobs_excludes_keep_job_and_recent_jobs(self):
+        # #78: exclude_job_id로 넘긴 job은 아무리 오래돼도 후보에서 빠진다.
+        db.create_job("old", original_path=Path("a"), protected_path=Path("a"), sha256="a", phash="a", created_at=0.0)
+        db.create_job("recent", original_path=Path("b"), protected_path=Path("b"), sha256="b", phash="b", created_at=900.0)
+        db.create_job("keep-even-if-old", original_path=Path("c"), protected_path=Path("c"), sha256="c", phash="c", created_at=0.0)
+
+        prunable = db.list_prunable_jobs(
+            exclude_job_id="keep-even-if-old", older_than_seconds=100.0, now=1000.0
+        )
+        prunable_ids = {job["id"] for job in prunable}
+        self.assertEqual(prunable_ids, {"old"})  # recent는 cutoff(900) 안쪽이라 제외
+
+    def test_list_prunable_jobs_skips_already_pruned(self):
+        db.create_job("old", original_path=Path("a"), protected_path=Path("a"), sha256="a", phash="a", created_at=0.0)
+        db.mark_files_pruned("old")
+        prunable = db.list_prunable_jobs(exclude_job_id="keep", older_than_seconds=0.0, now=1000.0)
+        self.assertEqual(prunable, [])
+
+    def test_mark_files_pruned_does_not_touch_job_count(self):
+        # DB 행은 그대로 남아 protectedCount 같은 누적 통계를 안 깨야 한다.
+        db.create_job("old", original_path=Path("a"), protected_path=Path("a"), sha256="a", phash="a", created_at=0.0)
+        db.mark_files_pruned("old")
+        self.assertEqual(db.count_completed_jobs(), 1)
+        self.assertTrue(db.get_job("old")["filesPruned"])
+
     def test_manual_reports_preserve_insertion_order(self):
         db.add_manual_report("https://example.com/1", created_at=1.0)
         db.add_manual_report("https://example.com/2", created_at=2.0)
