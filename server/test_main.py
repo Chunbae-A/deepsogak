@@ -47,16 +47,32 @@ class ServerEndpointsTestCase(unittest.TestCase):
         # 돌 때도 이 테스트가 독립적으로 동작하게 하기 위함이다.
         db.init_db(main.DB_PATH)
         db.reset_all()
+        main.FACEGUARD_SCANS.clear()
+        main.MONITORING_SCAN_BY_JOB.clear()
         patcher = patch.object(main, "deepbaeksin")
         self.mock_deepbaeksin = patcher.start()
         self.mock_deepbaeksin.apply_deepbaeksin.side_effect = _fake_apply_deepbaeksin
         self.mock_deepbaeksin.warm_up.return_value = True
         self.addCleanup(patcher.stop)
 
-        # 실제 Google Vision API를 호출하면 네트워크에 의존해 테스트가 느려지고
-        # 불안정해진다. 얼굴가드 순찰 로직 자체(pHash 대조 등)는 vision_scan
-        # 모듈의 몫이라 여기서는 빈 결과로 고정해 서버 쪽 연결부만 검증한다.
-        vision_patcher = patch.object(main.vision_scan, "scan_web", return_value=[])
+        # 실제 Google Vision·모델 API를 호출하면 네트워크에 의존해 테스트가
+        # 느려지고 불안정해진다. discover_web_candidates가 빈 결과를 돌려주면
+        # main._get_active_scan()이 모델 API(enrollment·scan)까지 갈 것도
+        # 없이 바로 "후보 없음"으로 종결하므로, 얼굴가드 파이프라인 자체는
+        # test_faceguard_flow.py에서 따로 검증하고 여기서는 서버 쪽 연결부만 본다.
+        vision_patcher = patch.object(
+            main.vision_scan,
+            "discover_web_candidates",
+            return_value={
+                "provider": "google_vision_web_detection",
+                "status": "completed",
+                "raw_candidate_count": 0,
+                "candidate_count": 0,
+                "truncated_count": 0,
+                "best_guess_labels": [],
+                "candidates": [],
+            },
+        )
         vision_patcher.start()
         self.addCleanup(vision_patcher.stop)
 
