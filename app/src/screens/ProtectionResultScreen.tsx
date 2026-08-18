@@ -32,8 +32,8 @@ export function ProtectionResultScreen({
       .then((data) => {
         if (!cancelled) setResult(data);
       })
-      .catch(() => {
-        if (!cancelled) setError('처리 결과를 불러오지 못했습니다.');
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : '처리 결과를 불러오지 못했습니다.');
       });
     return () => {
       cancelled = true;

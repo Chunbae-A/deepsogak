@@ -131,6 +131,43 @@ class ServerEndpointsTestCase(unittest.TestCase):
         self.assertTrue(old_job["filesPruned"])
         self.assertEqual(db.count_completed_jobs(), 2)  # old-job + 방금 완료된 job
 
+    def test_result_for_pruned_job_reports_expired_instead_of_broken_photo_urls(self):
+        # filesPruned=True인 job은 photoUrl을 내려주면 화면에서 깨진 이미지로
+        # 보인다 — 대신 별도 status로 분기해야 한다.
+        pruned_original = main.UPLOADS_DIR / "pruned_original.jpg"
+        pruned_protected = main.PROTECTED_DIR / "pruned_protected.jpg"
+        db.create_job(
+            "pruned-job",
+            original_path=pruned_original,
+            protected_path=pruned_protected,
+            sha256="pruned-sha",
+            phash="pruned-phash",
+            created_at=0.0,
+        )
+        db.mark_files_pruned("pruned-job")
+
+        result = self.client.get("/api/protection/result", params={"jobId": "pruned-job"})
+
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json(), {"status": "expired"})
+
+    def test_save_for_pruned_job_returns_410_not_a_missing_file_crash(self):
+        pruned_original = main.UPLOADS_DIR / "pruned_original2.jpg"
+        pruned_protected = main.PROTECTED_DIR / "pruned_protected2.jpg"
+        db.create_job(
+            "pruned-job-2",
+            original_path=pruned_original,
+            protected_path=pruned_protected,
+            sha256="pruned-sha-2",
+            phash="pruned-phash-2",
+            created_at=0.0,
+        )
+        db.mark_files_pruned("pruned-job-2")
+
+        response = self.client.post("/api/protection/save", params={"jobId": "pruned-job-2"})
+
+        self.assertEqual(response.status_code, 410)
+
     def test_home_summary_counts_persist_across_requests(self):
         self._upload()
         self._upload()

@@ -208,6 +208,11 @@ def get_protection_result(jobId: str):
         return {"status": "processing"}
     if job["status"] == "failed":
         return {"status": "failed", "errorReason": job["errorReason"]}
+    if job["filesPruned"]:
+        # #78: 이 job이 "최신"이 아니게 된 뒤 원본·보호사진 파일이 정리됐다.
+        # photoUrl을 그대로 내려주면 화면에서 깨진 이미지로 보이므로, 아예
+        # 별도 상태로 분기해 화면이 "만료된 결과" 안내를 보여줄 수 있게 한다.
+        return {"status": "expired"}
 
     deepbaeksin_meta = job["deepbaeksinMeta"] or {"reason": None}
 
@@ -219,10 +224,6 @@ def get_protection_result(jobId: str):
         "protectedPhotoUrl": f"/static/protected/{job['protectedPath'].name}",
         "sha256": job["sha256"],
         "phash": job["phash"],
-        # #78: 이 job이 "최신"이 아니게 된 뒤 파일이 정리됐으면 위 photoUrl들은
-        # 더 이상 유효하지 않다(404). 화면에서 "만료된 결과" 안내가 필요하면
-        # 이 값으로 분기할 수 있다.
-        "filesPruned": job["filesPruned"],
         "appliedChecks": [
             _deepbaeksin_check_message(deepbaeksin_meta),
             "불필요한 위치정보 제거 완료",
@@ -240,6 +241,8 @@ def save_protection(jobId: str):
         raise HTTPException(status_code=404, detail="처리 결과를 찾을 수 없습니다.")
     if job["status"] != "completed":
         raise HTTPException(status_code=409, detail="아직 처리 중이거나 실패한 작업입니다.")
+    if job["filesPruned"]:
+        raise HTTPException(status_code=410, detail="보호사진 파일이 정리되어 더 이상 저장할 수 없습니다.")
     saved_path = SAVED_DIR / job["protectedPath"].name
     try:
         saved_path.write_bytes(job["protectedPath"].read_bytes())
