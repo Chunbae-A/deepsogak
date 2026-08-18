@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     deepbaeksin_applied INTEGER NOT NULL DEFAULT 0,
     deepbaeksin_meta TEXT,
     status TEXT NOT NULL DEFAULT 'completed',
-    error_reason TEXT
+    error_reason TEXT,
+    owner_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS manual_reports (
@@ -81,6 +82,8 @@ def _migrate_add_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE jobs ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'")
     if "error_reason" not in existing:
         conn.execute("ALTER TABLE jobs ADD COLUMN error_reason TEXT")
+    if "owner_id" not in existing:
+        conn.execute("ALTER TABLE jobs ADD COLUMN owner_id TEXT")
 
 
 def _require_path() -> Path:
@@ -120,6 +123,7 @@ def create_job(
     created_at: float,
     deepbaeksin_applied: bool = False,
     deepbaeksin_meta: dict[str, Any] | None = None,
+    owner_id: str | None = None,
 ) -> None:
     """이미 처리가 끝난 작업을 한 번에 기록한다(주로 테스트·단발성 스크립트용).
 
@@ -132,8 +136,8 @@ def create_job(
             """
             INSERT INTO jobs
                 (id, original_path, protected_path, sha256, phash, created_at,
-                 deepbaeksin_applied, deepbaeksin_meta, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed')
+                 deepbaeksin_applied, deepbaeksin_meta, status, owner_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)
             """,
             (
                 job_id,
@@ -144,19 +148,29 @@ def create_job(
                 created_at,
                 1 if deepbaeksin_applied else 0,
                 json.dumps(deepbaeksin_meta, ensure_ascii=False) if deepbaeksin_meta else None,
+                owner_id,
             ),
         )
 
 
-def create_pending_job(job_id: str, *, original_path: Path, created_at: float) -> None:
-    """원본만 저장된 상태로 작업을 만든다. 딥백신 처리는 아직 안 끝났다."""
+def create_pending_job(
+    job_id: str, *, original_path: Path, created_at: float, owner_id: str | None = None
+) -> None:
+    """원본만 저장된 상태로 작업을 만든다. 딥백신 처리는 아직 안 끝났다.
+
+    owner_id: #77 스캐폴딩용 컬럼. 지금은 아무도 값을 채워 보내지 않아
+    항상 NULL이고, get_latest_completed_job()도 아직 이 값으로 필터링하지
+    않는다(기존 "서버 인스턴스 하나 = 사용자 한 명" 동작 그대로 유지).
+    클라이언트가 실제 식별자를 보내도록 정하고 나면 이 컬럼과
+    get_latest_completed_job(owner_id=...)를 실제로 연결한다.
+    """
     with _connect() as conn:
         conn.execute(
             """
-            INSERT INTO jobs (id, original_path, created_at, status)
-            VALUES (?, ?, ?, 'processing')
+            INSERT INTO jobs (id, original_path, created_at, status, owner_id)
+            VALUES (?, ?, ?, 'processing', ?)
             """,
-            (job_id, str(original_path), created_at),
+            (job_id, str(original_path), created_at, owner_id),
         )
 
 
@@ -209,6 +223,7 @@ def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
         "deepbaeksinMeta": json.loads(row["deepbaeksin_meta"]) if row["deepbaeksin_meta"] else None,
         "status": row["status"],
         "errorReason": row["error_reason"],
+        "ownerId": row["owner_id"],
     }
 
 
@@ -218,16 +233,34 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     return _row_to_job(row) if row else None
 
 
-def get_latest_completed_job() -> tuple[str, dict[str, Any]] | None:
+def get_latest_completed_job(
+    *, owner_id: str | None = None
+) -> tuple[str, dict[str, Any]] | None:
     """얼굴가드 순찰 등에 쓸, 가장 최근에 '완료된' 보호사진을 찾는다.
 
     아직 처리 중이거나 실패한 job은 protected_path가 없어 순찰 대상이 될 수
     없으므로 completed만 본다.
+
+    owner_id: #77 스캐폴딩용. None(기본값)이면 지금까지와 동일하게 DB
+    전체에서 가장 최근 job을 돌려준다(서버 인스턴스 하나 = 사용자 한 명
+    전제). 값을 넘기면 그 owner_id로만 좁혀서 찾는다 — 다만 지금은
+    create_pending_job()을 부르는 쪽(main.py) 어디도 owner_id를 채워
+    보내지 않으므로, 값을 넘겨도 매칭되는 job이 없을 수 있다. 실제로
+    쓰려면 클라이언트 식별자를 받는 부분이 먼저 필요하다(#77 본문 참고).
     """
     with _connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM jobs WHERE status = 'completed' ORDER BY created_at DESC LIMIT 1"
-        ).fetchone()
+        if owner_id is None:
+            row = conn.execute(
+                "SELECT * FROM jobs WHERE status = 'completed' ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT * FROM jobs WHERE status = 'completed' AND owner_id = ?
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (owner_id,),
+            ).fetchone()
     if row is None:
         return None
     return row["id"], _row_to_job(row)
