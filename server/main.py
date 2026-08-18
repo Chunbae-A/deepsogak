@@ -651,33 +651,97 @@ async def get_faceguard_candidates(scan_id: str):
 
 
 # ---------------------------------------------------------------------------
-# 얼굴가드: GOOGLE_VISION_API_KEY가 있으면 vision_scan으로 실제 역이미지 검색 +
-# pHash 실측 검증을 수행한다 (참고: https://github.com/BcKmini/copycat-watch).
-# 키가 없거나 아직 보호사진을 만들지 않았으면 고정된 시뮬레이션 데이터로 폴백한다.
-# 딥페이크 판별(EfficientNet-B4) 모델은 아직 없어 riskLevel은 pHash 유사도로 근사한다.
+# 얼굴가드: 가장 최근 완료된 보호사진을 등록 사진으로 삼아 실제 얼굴가드
+# 파이프라인(/api/faceguard/scans/* — Google Vision → ArcFace 동일인 판별 →
+# EfficientNet-B4 딥페이크 판별)을 재사용한다(#80).
+#
+# 예전에는 pHash 유사도로 위험도를 근사하거나(vision_scan.scan_web, 제거됨),
+# 아직 보호사진이 없으면 하드코딩된 가짜 후보 3개(CANDIDATE_DETAILS, 제거됨)를
+# 보여줬다. #55에서 이미 만든 진짜 모델 파이프라인이 있는데도 화면은 그 결과를
+# 전혀 쓰지 않고 있었다 — 이제는 /api/monitoring/*가 내부적으로
+# /api/faceguard/scans/*를 그대로 호출해서 진짜 값을 돌려준다.
+#
+# referenceJobIds: 지금 앱에는 "이 사진이 내 등록 사진이다"라는 개념이 없다
+# (서버 인스턴스 하나 = 사용자 한 명 전제, #77과 동일). 그래서 가장 최근
+# 완료된 job을 자동으로 등록 사진으로 취급한다.
+#
+# 스캔은 Vision·모델 API를 오가는 비동기 작업이라 완료까지 몇 초~수십 초
+# 걸릴 수 있다. 이번 변경은 앱 쪽 코드를 건드리지 않는 "서버측 브리지"라
+# 폴링 UI가 없다 — 완료 전에는 status="scanning"으로 빈 후보 목록을
+# 돌려주고, 다음 요청 때 완료돼 있으면 실제 후보가 채워진다(#80 후속:
+# 앱이 직접 새 엔드포인트로 폴링하도록 바꾸는 건 별도 작업).
 # ---------------------------------------------------------------------------
 
-def _get_active_matches() -> list[dict] | None:
+MONITORING_SCAN_BY_JOB: dict[str, str] = {}
+
+
+async def _get_active_scan() -> dict | None:
+    """가장 최근 완료된 job에 대한 얼굴가드 스캔 상태를 얻는다.
+
+    보호사진이 아직 없으면 None. 있으면 {"status": "scanning"|"ready"|"error",
+    "candidates": [...]}를 돌려준다("ready"일 때만 candidates가 채워진다).
+    """
     latest = db.get_latest_completed_job()
     if latest is None:
         return None
-    latest_job_id, job = latest
-    cached = db.get_scan_cache(latest_job_id)
+    job_id, _job = latest
+
+    cached = db.get_scan_cache(job_id)
     if cached is not None:
-        return cached
-    image_bytes = job["protectedPath"].read_bytes()
-    query_hash = imagehash.hex_to_hash(job["phash"])
-    matches = vision_scan.scan_web(image_bytes, query_hash)
-    db.set_scan_cache(latest_job_id, matches)
-    return matches
+        return {"status": "ready", "candidates": cached}
+
+    scan_id = MONITORING_SCAN_BY_JOB.get(job_id)
+    if scan_id is None:
+        try:
+            started = await start_faceguard_scan(
+                StartFaceGuardScanBody(
+                    referenceJobIds=[job_id], webMonitoringConsent=True, maximumResults=10
+                )
+            )
+        except HTTPException:
+            logger.exception("얼굴가드 자동 스캔 시작 실패 (jobId=%s)", job_id)
+            return {"status": "error", "candidates": []}
+        scan_id = started["scanId"]
+        MONITORING_SCAN_BY_JOB[job_id] = scan_id
+        if started["status"] == "completed":
+            # Vision이 공개 후보를 아예 못 찾은 경우 start_faceguard_scan이
+            # 모델 API까지 갈 것도 없이 바로 completed로 기록해둔다.
+            db.set_scan_cache(job_id, [])
+            return {"status": "ready", "candidates": []}
+
+    try:
+        status_payload = await get_faceguard_scan(scan_id)
+    except HTTPException:
+        logger.exception("얼굴가드 스캔 상태 조회 실패 (scanId=%s)", scan_id)
+        return {"status": "error", "candidates": []}
+
+    if status_payload["status"] not in ("completed", "partial_failed"):
+        return {"status": "scanning", "candidates": []}
+
+    try:
+        candidates_payload = await get_faceguard_candidates(scan_id)
+    except HTTPException:
+        logger.exception("얼굴가드 후보 조회 실패 (scanId=%s)", scan_id)
+        return {"status": "error", "candidates": []}
+
+    candidates = candidates_payload["candidates"]
+    db.set_scan_cache(job_id, candidates)
+    return {"status": "ready", "candidates": candidates}
 
 
-def _risk_from_similarity(similarity: float) -> tuple[str, str]:
-    if similarity >= 85:
+def _source_label(provider: str | None) -> str:
+    return {"google_vision_web_detection": "Google 이미지 검색"}.get(provider, provider or "기타")
+
+
+def _risk_from_candidate(candidate: dict) -> tuple[str, str]:
+    action = candidate.get("recommendedAction")
+    if action == "review_required":
         return "high", "딥페이크 위험도 · 높음"
-    if similarity >= vision_scan.SIMILARITY_THRESHOLD:
+    if action == "monitor":
         return "low", "딥페이크 위험도 · 낮음"
-    return "exclude-recommended", "제외 권장"
+    if action == "exclude_recommended":
+        return "exclude-recommended", "제외 권장"
+    return "medium", "수동 확인 필요"
 
 
 # 사용자가 "URL·캡처·파일 직접 제보"로 추가한 항목. 자동 순찰 대상이 아닌 비공개
@@ -698,23 +762,26 @@ def submit_manual_report(body: ManualReportBody):
 
 
 @app.get("/api/monitoring/summary")
-def get_monitoring_summary():
-    matches = _get_active_matches()
-    if matches is None:
-        base_total = 6
-        last_checked = "2026.08.02 14:32"
-        sources = [
-            {"label": "검색엔진", "count": "3건"},
-            {"label": "공개 SNS", "count": "2건"},
-            {"label": "기타 웹사이트", "count": "1건"},
-        ]
+async def get_monitoring_summary():
+    scan = await _get_active_scan()
+    if scan is None:
+        last_checked = "아직 보호사진 없음"
+        candidates: list[dict] = []
+    elif scan["status"] == "scanning":
+        last_checked = "스캔 진행 중..."
+        candidates = []
+    elif scan["status"] == "error":
+        last_checked = "확인 실패 — 잠시 후 다시 시도해 주세요"
+        candidates = []
     else:
-        counts: dict[str, int] = {}
-        for m in matches:
-            counts[m["source_type"]] = counts.get(m["source_type"], 0) + 1
-        base_total = len(matches)
         last_checked = "방금 확인"
-        sources = [{"label": label, "count": f"{count}건"} for label, count in counts.items()]
+        candidates = scan["candidates"]
+
+    counts: dict[str, int] = {}
+    for c in candidates:
+        label = _source_label(c.get("sourceProvider"))
+        counts[label] = counts.get(label, 0) + 1
+    sources = [{"label": label, "count": f"{count}건"} for label, count in counts.items()]
 
     manual_reports = db.list_manual_reports()
     if manual_reports:
@@ -722,33 +789,29 @@ def get_monitoring_summary():
 
     return {
         "lastCheckedAt": last_checked,
-        "totalCandidates": base_total + len(manual_reports),
+        "totalCandidates": len(candidates) + len(manual_reports),
         "sources": sources,
     }
 
 
 @app.get("/api/monitoring/candidates")
-def get_candidates():
-    matches = _get_active_matches()
-    if matches is None:
-        result = [
-            {"id": "c1", "label": "후보 1", "similarityPercent": 92, "riskLabel": "딥페이크 위험도 · 높음", "riskLevel": "high", "sourceLabel": "공개 SNS", "thumbnailUrl": None},
-            {"id": "c2", "label": "후보 2", "similarityPercent": 71, "riskLabel": "딥페이크 위험도 · 낮음", "riskLevel": "low", "sourceLabel": "검색엔진", "thumbnailUrl": None},
-            {"id": "c3", "label": "후보 3", "similarityPercent": 38, "riskLabel": "제외 권장", "riskLevel": "exclude-recommended", "sourceLabel": "기타 웹사이트", "thumbnailUrl": None},
-        ]
-    else:
-        result = []
-        for i, m in enumerate(matches, start=1):
-            risk_level, risk_label = _risk_from_similarity(m["similarity"])
-            result.append({
-                "id": f"c{i}",
-                "label": f"후보 {i}",
-                "similarityPercent": round(m["similarity"]),
-                "riskLabel": risk_label,
-                "riskLevel": risk_level,
-                "sourceLabel": m["source_type"],
-                "thumbnailUrl": m["image_url"],
-            })
+async def get_candidates():
+    scan = await _get_active_scan()
+    candidates = scan["candidates"] if scan is not None and scan["status"] == "ready" else []
+
+    result = []
+    for i, c in enumerate(candidates, start=1):
+        risk_level, risk_label = _risk_from_candidate(c)
+        similarity = c.get("faceSimilarity")
+        result.append({
+            "id": f"c{i}",
+            "label": f"후보 {i}",
+            "similarityPercent": round(similarity * 100) if similarity is not None else 0,
+            "riskLabel": risk_label,
+            "riskLevel": risk_level,
+            "sourceLabel": _source_label(c.get("sourceProvider")),
+            "thumbnailUrl": c.get("thumbnailUrl") or c.get("mediaUrl"),
+        })
 
     for j, _rep in enumerate(db.list_manual_reports(), start=len(result) + 1):
         result.append({
@@ -763,43 +826,18 @@ def get_candidates():
     return result
 
 
-CANDIDATE_DETAILS = {
-    "c1": {
-        "sourceLabel": "공개 SNS",
-        "sourceUrl": "social.example.com/post/8A31",
-        "sourceAccount": "@public_archive",
-        "foundAt": "오늘 14:28",
-        "signals": ["얼굴 경계와 피부 질감에서 합성 흔적 감지", "원본 보호본과 pHash 유사 패턴 확인"],
-    },
-    "c2": {
-        "sourceLabel": "검색엔진",
-        "sourceUrl": "images.example.net/gallery/552",
-        "sourceAccount": "-",
-        "foundAt": "오늘 09:12",
-        "signals": ["합성 흔적 뚜렷하지 않음", "동일 인물 가능성만 확인됨"],
-    },
-    "c3": {
-        "sourceLabel": "기타 웹사이트",
-        "sourceUrl": "forum.example.org/thread/19",
-        "sourceAccount": "-",
-        "foundAt": "어제 22:47",
-        "signals": ["얼굴 유사도 기준(0.6) 미달", "다른 인물일 가능성이 높음"],
-    },
-}
-
-
 @app.get("/api/monitoring/candidates/{candidate_id}")
-def get_candidate_detail(candidate_id: str):
-    base = next((c for c in get_candidates() if c["id"] == candidate_id), None)
+async def get_candidate_detail(candidate_id: str):
+    base = next((c for c in await get_candidates() if c["id"] == candidate_id), None)
     if base is None:
         raise HTTPException(status_code=404, detail="후보를 찾을 수 없습니다.")
 
-    matches = _get_active_matches()
-    base_count = len(matches) if matches is not None else 3
+    scan = await _get_active_scan()
+    candidates = scan["candidates"] if scan is not None and scan["status"] == "ready" else []
     index = int(candidate_id[1:]) - 1
 
-    if index >= base_count:
-        rep = db.list_manual_reports()[index - base_count]
+    if index >= len(candidates):
+        rep = db.list_manual_reports()[index - len(candidates)]
         return {
             **base,
             "sourceLabel": "직접 제보",
@@ -809,23 +847,39 @@ def get_candidate_detail(candidate_id: str):
             "signals": ["사용자가 직접 제출한 URL로, 자동 판별 대상이 아님", "필요 시 그대로 신고자료에 포함할 수 있음"],
         }
 
-    if matches is not None:
-        m = matches[index]
-        signals = ["pHash 기반 이미지 유사도 실측 대조"]
-        signals.append("게시 페이지 직접 방문 확인" if m["source_url"] else "이미지 URL 직접 대조 (게시 페이지 미확인)")
-        return {
-            **base,
-            "sourceLabel": m["source_type"],
-            "sourceUrl": m["source_url"] or m["image_url"] or "-",
-            "sourceAccount": "-",
-            "foundAt": "방금 확인",
-            "signals": signals,
-        }
+    c = candidates[index]
+    signals = []
+    similarity = c.get("faceSimilarity")
+    if c.get("isSamePerson") is True:
+        signals.append(
+            f"ArcFace 동일인 판별: 일치 (코사인 유사도 {similarity:.3f})"
+            if similarity is not None else "ArcFace 동일인 판별: 일치"
+        )
+    elif c.get("isSamePerson") is False:
+        signals.append("ArcFace 동일인 판별: 불일치")
+    else:
+        signals.append("ArcFace 동일인 판별: 미완료")
 
-    detail = CANDIDATE_DETAILS.get(candidate_id)
-    if detail is None:
-        raise HTTPException(status_code=404, detail="후보를 찾을 수 없습니다.")
-    return {**base, **detail}
+    deepfake_score = c.get("deepfakeScore")
+    if c.get("isSuspectedDeepfake") is True:
+        signals.append(
+            f"EfficientNet-B4 딥페이크 신호: 의심됨 (원점수 {deepfake_score:.4f})"
+            if deepfake_score is not None else "EfficientNet-B4 딥페이크 신호: 의심됨"
+        )
+    elif c.get("isSuspectedDeepfake") is False:
+        signals.append("EfficientNet-B4 딥페이크 신호: 의심 안 됨")
+    else:
+        signals.append("EfficientNet-B4 딥페이크 신호: 분석 미완료")
+    signals.append(c.get("warning") or model_api.RESEARCH_WARNING)
+
+    return {
+        **base,
+        "sourceLabel": _source_label(c.get("sourceProvider")),
+        "sourceUrl": c.get("sourceUrl") or c.get("mediaUrl") or "-",
+        "sourceAccount": "-",
+        "foundAt": "방금 확인",
+        "signals": signals,
+    }
 
 
 class ConfirmCandidatesBody(BaseModel):
@@ -846,19 +900,19 @@ def confirm_candidates(body: ConfirmCandidatesBody):
 # "직접 수정"으로 사용자가 덮어쓴 증거 초안. 값이 있으면 계산된 초안보다 우선한다.
 
 
-def _build_report_draft() -> list[dict]:
+async def _build_report_draft() -> list[dict]:
     draft_overrides = db.get_draft_overrides()
     if draft_overrides is not None:
         return draft_overrides
 
-    matches = _get_active_matches()
-    base_count = len(matches) if matches is not None else 3
+    scan = await _get_active_scan()
+    candidates = scan["candidates"] if scan is not None and scan["status"] == "ready" else []
     confirmed_keep_ids = db.get_confirmed_keep_ids()
     primary_id = confirmed_keep_ids[0] if confirmed_keep_ids else None
     primary_index = int(primary_id[1:]) - 1 if primary_id else None
 
-    if primary_index is not None and primary_index >= base_count:
-        rep = db.list_manual_reports()[primary_index - base_count]
+    if primary_index is not None and primary_index >= len(candidates):
+        rep = db.list_manual_reports()[primary_index - len(candidates)]
         return [
             {"key": "postUrl", "label": "게시물 URL", "value": rep["url"]},
             {"key": "account", "label": "게시 계정", "value": "-"},
@@ -870,25 +924,25 @@ def _build_report_draft() -> list[dict]:
             {"key": "aiResult", "label": "AI 분석 결과", "value": "미판별(직접 제보)"},
         ]
 
-    if matches is None or primary_index is None or not (0 <= primary_index < base_count):
+    if primary_index is None or not (0 <= primary_index < len(candidates)):
         return [
-            {"key": "postUrl", "label": "게시물 URL", "value": "example.com/p/1248"},
-            {"key": "account", "label": "게시 계정", "value": "@public_sample"},
-            {"key": "foundAt", "label": "발견 시각", "value": "2026.08.02 14:21"},
-            {"key": "capture", "label": "캡처 또는 파일", "value": "capture_01.png"},
-            {"key": "sha256", "label": "SHA-256", "value": "확인 완료"},
-            {"key": "phash", "label": "pHash", "value": "등록 완료"},
-            {"key": "c2pa", "label": "C2PA 확인 상태", "value": "원본 불일치"},
-            {"key": "aiResult", "label": "AI 분석 결과", "value": "위험도 높음"},
+            {"key": "postUrl", "label": "게시물 URL", "value": "-"},
+            {"key": "account", "label": "게시 계정", "value": "-"},
+            {"key": "foundAt", "label": "발견 시각", "value": "-"},
+            {"key": "capture", "label": "캡처 또는 파일", "value": "-"},
+            {"key": "sha256", "label": "SHA-256", "value": "-"},
+            {"key": "phash", "label": "pHash", "value": "-"},
+            {"key": "c2pa", "label": "C2PA 확인 상태", "value": "-"},
+            {"key": "aiResult", "label": "AI 분석 결과", "value": "확정된 후보 없음"},
         ]
 
-    m = matches[primary_index]
-    _, risk_label = _risk_from_similarity(m["similarity"])
+    c = candidates[primary_index]
+    _, risk_label = _risk_from_candidate(c)
     return [
-        {"key": "postUrl", "label": "게시물 URL", "value": m["source_url"] or m["image_url"] or "-"},
+        {"key": "postUrl", "label": "게시물 URL", "value": c.get("sourceUrl") or c.get("mediaUrl") or "-"},
         {"key": "account", "label": "게시 계정", "value": "-"},
         {"key": "foundAt", "label": "발견 시각", "value": "방금 확인"},
-        {"key": "capture", "label": "캡처 또는 파일", "value": "자동 수집 이미지" if m["image_url"] else "-"},
+        {"key": "capture", "label": "캡처 또는 파일", "value": "자동 수집 이미지" if c.get("mediaUrl") else "-"},
         {"key": "sha256", "label": "SHA-256", "value": "확인 완료"},
         {"key": "phash", "label": "pHash", "value": "등록 완료"},
         {"key": "c2pa", "label": "C2PA 확인 상태", "value": "원본 불일치"},
@@ -897,8 +951,8 @@ def _build_report_draft() -> list[dict]:
 
 
 @app.get("/api/report/draft")
-def get_report_draft():
-    return _build_report_draft()
+async def get_report_draft():
+    return await _build_report_draft()
 
 
 class EvidenceFieldBody(BaseModel):
@@ -924,10 +978,10 @@ def submit_report_consent():
 
 
 @app.get("/api/report/package")
-def get_report_package():
+async def get_report_package():
     """동의된 증거 초안을 실제 파일(텍스트)로 묶어 내려준다. PDF·ZIP 생성기는 아직 없어
     프로토타입 단계에서는 사람이 바로 읽을 수 있는 증거 요약 텍스트로 대신한다."""
-    draft = _build_report_draft()
+    draft = await _build_report_draft()
     generated_at = datetime.now().strftime("%Y.%m.%d %H:%M")
     lines = [
         "딥소각 증거·신고서 초안",
@@ -955,8 +1009,8 @@ def get_report_package():
 
 
 @app.get("/api/home/summary")
-def get_home_summary():
-    monitoring = get_monitoring_summary()
+async def get_home_summary():
+    monitoring = await get_monitoring_summary()
     return {
         "protectedCount": db.count_completed_jobs(),
         "candidateCount": monitoring["totalCandidates"],

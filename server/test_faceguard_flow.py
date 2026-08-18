@@ -181,5 +181,131 @@ class FaceGuardFlowTests(unittest.TestCase):
         self.assertNotIn("server-only-key", response.text)
 
 
+class MonitoringBridgeTests(unittest.TestCase):
+    """#80: /api/monitoring/*가 예전 pHash 시뮬레이션이 아니라 진짜
+    /api/faceguard/scans/* 파이프라인 결과를 그대로 반영하는지 검증한다."""
+
+    def setUp(self) -> None:
+        db.init_db(main.DB_PATH)
+        db.reset_all()
+        main.FACEGUARD_SCANS.clear()
+        main.MONITORING_SCAN_BY_JOB.clear()
+        self.temp_dir = tempfile.TemporaryDirectory()
+        root = Path(self.temp_dir.name)
+        original = root / "original.jpg"
+        protected = root / "protected.jpg"
+        original.write_bytes(b"original-image")
+        protected.write_bytes(b"metadata-free-image")
+        db.create_job(
+            "job-1",
+            original_path=original,
+            protected_path=protected,
+            sha256="fake-sha256",
+            phash="fake-phash",
+            created_at=time.time(),
+        )
+        self.client = TestClient(main.app)
+
+    def tearDown(self) -> None:
+        self.client.close()
+        self.temp_dir.cleanup()
+
+    def _mock_discovery(self) -> dict:
+        return {
+            "provider": "google_vision_web_detection",
+            "status": "completed",
+            "raw_candidate_count": 1,
+            "candidate_count": 1,
+            "truncated_count": 0,
+            "best_guess_labels": [],
+            "candidates": [
+                {
+                    "page_url": "https://example.com/post",
+                    "media_url": "https://cdn.example.com/image.jpg",
+                    "thumbnail_url": "https://cdn.example.com/image.jpg",
+                    "provider": "google_vision_web_detection",
+                    "match_type": "partial_match",
+                    "page_title": "게시물",
+                }
+            ],
+        }
+
+    @patch("main.model_api.get_exposure_candidates")
+    @patch("main.model_api.get_exposure_scan")
+    @patch("main.model_api.start_candidate_scan")
+    @patch("main.model_api.create_face_enrollment")
+    @patch("main.vision_scan.discover_web_candidates")
+    def test_candidates_reflect_real_pipeline_result_not_hardcoded_fallback(
+        self, discover, enroll, start_scan, get_scan, get_candidates
+    ) -> None:
+        discover.return_value = self._mock_discovery()
+        enroll.return_value = {"enrollment_id": "enrollment-1"}
+        start_scan.return_value = {"scan_id": "scan-1", "status": "queued"}
+        get_scan.return_value = {"status": "completed", "progress_percent": 100, "progress": {}}
+        get_candidates.return_value = {
+            "scan_id": "scan-1",
+            "status": "completed",
+            "candidates": [
+                {
+                    "candidate_id": "candidate-1",
+                    "source_url": "https://example.com/post",
+                    "media_url": "https://cdn.example.com/image.jpg",
+                    "thumbnail_url": None,
+                    "face_similarity": 0.9123,
+                    "face_match_level": "matched",
+                    "deepfake_score": 0.8123,
+                    "deepfake_signal": "suspected",
+                    "recommended_action": "review_required",
+                    "warning": "연구용 원점수",
+                }
+            ],
+        }
+
+        response = self.client.get("/api/monitoring/candidates")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(len(body), 1)
+        # 예전 하드코딩 값(예: 92%, "공개 SNS")이 아니라 모델 API가 돌려준
+        # 실제 face_similarity·recommendedAction을 그대로 반영해야 한다.
+        self.assertEqual(body[0]["similarityPercent"], 91)
+        self.assertEqual(body[0]["riskLabel"], "딥페이크 위험도 · 높음")
+        self.assertEqual(body[0]["riskLevel"], "high")
+        self.assertEqual(body[0]["sourceLabel"], "Google 이미지 검색")
+
+        detail = self.client.get("/api/monitoring/candidates/c1").json()
+        self.assertIn("0.912", detail["signals"][0])
+        self.assertIn("0.8123", detail["signals"][1])
+
+    @patch("main.vision_scan.discover_web_candidates")
+    def test_no_vision_candidates_returns_empty_list_not_hardcoded_fallback(self, discover) -> None:
+        discover.return_value = {
+            "provider": "google_vision_web_detection",
+            "status": "completed",
+            "raw_candidate_count": 0,
+            "candidate_count": 0,
+            "truncated_count": 0,
+            "best_guess_labels": [],
+            "candidates": [],
+        }
+
+        response = self.client.get("/api/monitoring/candidates")
+
+        self.assertEqual(response.status_code, 200)
+        # 예전에는 여기서 CANDIDATE_DETAILS 하드코딩 후보 3개(c1/c2/c3)가 나왔다.
+        self.assertEqual(response.json(), [])
+
+    def test_no_protected_photo_yet_returns_honest_empty_summary(self) -> None:
+        db.reset_all()  # job-1도 지운다 — 보호사진이 아예 없는 상태
+
+        response = self.client.get("/api/monitoring/summary")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        # 예전에는 여기서 totalCandidates=6짜리 가짜 요약이 나왔다.
+        self.assertEqual(body["totalCandidates"], 0)
+        self.assertEqual(body["lastCheckedAt"], "아직 보호사진 없음")
+
+
 if __name__ == "__main__":
     unittest.main()
