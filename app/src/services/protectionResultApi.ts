@@ -39,6 +39,7 @@ export type ProtectionResult = {
 export type ProtectionStatus =
   | { status: 'processing' }
   | { status: 'failed'; errorReason: string }
+  | { status: 'expired' }
   | ProtectionResult;
 
 async function fetchProtectionStatus(jobId: string): Promise<ProtectionStatus> {
@@ -57,6 +58,7 @@ export async function fetchProtectionResult(jobId: string): Promise<ProtectionRe
   const data = await fetchProtectionStatus(jobId);
   if (data.status === 'processing') throw new Error('아직 처리 중입니다.');
   if (data.status === 'failed') throw new Error(data.errorReason);
+  if (data.status === 'expired') throw new Error('보호사진 파일이 정리되어 더 이상 볼 수 없습니다.');
   return data;
 }
 
@@ -71,6 +73,7 @@ export async function pollProtectionResult(
     const data = await fetchProtectionStatus(jobId);
     if (data.status === 'completed') return data;
     if (data.status === 'failed') throw new Error(data.errorReason);
+    if (data.status === 'expired') throw new Error('보호사진 파일이 정리되어 더 이상 볼 수 없습니다.');
     if (Date.now() - startedAt > timeoutMs) throw new Error('처리 시간이 너무 오래 걸립니다.');
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
