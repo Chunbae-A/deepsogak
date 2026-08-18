@@ -40,6 +40,18 @@ def _sample_jpeg_bytes() -> bytes:
     return buf.getvalue()
 
 
+def _sample_palette_png_bytes() -> bytes:
+    """팔레트(P) 모드 PNG — pngquant 등으로 최적화된 이미지에서 흔하다."""
+    rgb = Image.new("RGB", (32, 32), color=(255, 0, 0))
+    for x in range(16, 32):
+        for y in range(32):
+            rgb.putpixel((x, y), (0, 255, 0))
+    p_image = rgb.convert("P", palette=Image.ADAPTIVE, colors=4)
+    buf = io.BytesIO()
+    p_image.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 class ServerEndpointsTestCase(unittest.TestCase):
     def setUp(self):
         # 다른 테스트 모듈(test_db.py)이 db._DB_PATH를 임시 파일로 바꿔놓고
@@ -239,6 +251,22 @@ class ServerEndpointsTestCase(unittest.TestCase):
             files={"photo": ("empty.jpg", b"", "image/jpeg")},
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_palette_mode_png_colors_survive_exif_strip(self):
+        # 팔레트(P) 모드 PNG를 image.mode 그대로 Image.new()에 넘기면 원본
+        # 팔레트를 안 가져와 픽셀이 전부 검은색으로 깨진다 — RGB 변환 후
+        # 다시 만들어야 색이 보존된다.
+        response = self.client.post(
+            "/api/protection/process",
+            files={"photo": ("palette.png", _sample_palette_png_bytes(), "image/png")},
+        )
+        self.assertEqual(response.status_code, 200)
+        job_id = response.json()["jobId"]
+
+        protected_path = main.PROTECTED_DIR / f"{job_id}_protected.png"
+        protected_image = Image.open(protected_path).convert("RGB")
+        self.assertEqual(protected_image.getpixel((0, 0)), (255, 0, 0))
+        self.assertEqual(protected_image.getpixel((20, 0)), (0, 255, 0))
 
     def test_db_file_is_not_reachable_through_static_mount(self):
         # 회귀 방지(#75): DB 파일이 /static(=STORAGE_DIR) 트리 밖에 있어야
