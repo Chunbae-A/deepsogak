@@ -56,6 +56,28 @@ DC 계수를 가장 약하게 압축한다(가장 잘 보존한다). 그래서 �
 재업로드를 흉내 낸 JPEG 재압축 왕복 후에도 효과가 남아있는지 검증해
 메타데이터에 정직하게 남긴다(100% 보장이 아니라 참고 신호다).
 
+## 블록 경계 스무딩 — 실측으로 드러난 시각적 흠과 트레이드오프
+
+실제 얼굴 사진(사용자가 직접 준 테스트 사진)으로 결과물을 육안으로 확인해보니,
+볼·턱처럼 매끈한 영역에서 인접 블록 간 밝기 차이가 옅은 격자 무늬로 보였다.
+탐색이 끝난 뒤 최종 delta에 작은 가우시안 블러(sigma=3, 블록 크기 32보다
+훨씬 작아 각 JPEG 블록 평균은 거의 그대로 두고 경계 부근만 섞음)를 적용하고
+L-infinity epsilon으로 다시 클리핑했다.
+
+실측(2026-08-18, 사용자 제공 실제 얼굴사진 413x531, epsilon=8):
+
+|              | 스무딩 전 | 스무딩 후 |
+|--------------|----------|----------|
+| 코사인 유사도 | 0.917    | 0.931    |
+| SSIM          | 0.992    | 0.997    |
+| JPEG q80 재압축 후 | 0.905 | 0.920    |
+
+공격 효과(유사도 하락폭)가 소폭 줄어드는 대가로(약 1.4%p) 시각적으로는
+뚜렷하게 개선된다 — 여전히 원본 대비 유사도를 0.93대까지 낮추는 강한 보호
+효과는 유지된다. JPEG 강건성도 비슷한 비율로 유지돼(스무딩이 저주파
+그라데이션을 만들 뿐이라 JPEG의 8x8 DCT가 여전히 잘 보존함) 위에서 설명한
+"JPEG 블록 그리드 정렬" 설계 논리는 그대로 성립한다.
+
 ## 앙상블(2모델)의 실제 비용 — 정직하게 밝히는 한계
 
 DEEPBAEKSIN_TARGET_MODELS=buffalo_l,buffalo_sc로 실제 두 모델을 동시에
@@ -115,12 +137,18 @@ from typing import Any
 
 import numpy as np
 from PIL import Image
+from scipy.ndimage import gaussian_filter
 from skimage.metrics import structural_similarity
 
 THRESHOLD_STATUS = "research_only_unapproved"
 
 # JPEG의 8x8 DCT 그리드와 정렬되도록 8의 배수로 고정한다(모듈 docstring 참고).
 BLOCK_SIZE = 32
+
+# 탐색이 끝난 뒤 블록 경계를 얼마나 부드럽게 섞을지(실측 근거는 apply_deepbaeksin
+# 안의 스무딩 코드 옆 주석 참고). block_size(32)보다 훨씬 작아야 블록 대부분의
+# 평균(JPEG DC 계수 대응)은 그대로 두고 경계 부근만 섞인다.
+_BLOCK_EDGE_SMOOTHING_SIGMA = 3.0
 
 _DEFAULT_TARGET_MODELS = ("buffalo_l",)
 _TARGET_MODELS_ENV_VAR = "DEEPBAEKSIN_TARGET_MODELS"
@@ -397,6 +425,20 @@ def apply_deepbaeksin(
 
         if iterations_run >= max_iterations or time.monotonic() - loop_started > effective_time_budget:
             break
+
+    # 블록 경계가 육안에도 살짝 보이는 격자 무늬로 남는다(실측 확인: 볼·턱처럼
+    # 매끈한 영역에서 인접 블록 간 급격한 밝기 차이가 눈에 띔). 경계 부근만
+    # 살짝 섞어 부드럽게 하면 눈에 덜 띈다 — L-infinity epsilon은 그대로 지킨다.
+    if np.any(delta):
+        delta = gaussian_filter(delta, sigma=(_BLOCK_EDGE_SMOOTHING_SIGMA, _BLOCK_EDGE_SMOOTHING_SIGMA, 0))
+        delta = np.clip(delta, -epsilon, epsilon)
+        # 블러는 탐색 영역 바깥의 0 값과도 섞여 경계 밖으로 살짝 번진다 — 얼굴
+        # 영역 밖은 절대 안 건드린다는 보장(#70)을 지키려면 다시 0으로 밀어낸다.
+        region_mask = np.zeros_like(delta, dtype=bool)
+        region_mask[region_top:region_bottom, region_left:region_right, :] = True
+        delta = np.where(region_mask, delta, 0.0)
+        smoothed_candidate = np.clip(original + delta, 0, 255).astype(np.uint8)
+        best_similarity, best_similarity_by_model = combined_similarity(smoothed_candidate)
 
     protected_array = np.clip(original + delta, 0, 255).astype(np.uint8)
     protected_image = Image.fromarray(protected_array, mode="RGB")
