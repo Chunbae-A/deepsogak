@@ -715,6 +715,12 @@ async def _get_active_scan() -> dict | None:
         logger.exception("얼굴가드 스캔 상태 조회 실패 (scanId=%s)", scan_id)
         return {"status": "error", "candidates": []}
 
+    if status_payload["status"] == "failed":
+        # 모델 API가 스캔 자체를 실패로 종결한 경우 — "scanning"으로 두면
+        # 영영 안 끝나는 것처럼 보인다. 별도 스캔을 다시 시작할 수 있게
+        # 매핑을 지운다(다음 요청에서 새 스캔을 시도).
+        MONITORING_SCAN_BY_JOB.pop(job_id, None)
+        return {"status": "error", "candidates": []}
     if status_payload["status"] not in ("completed", "partial_failed"):
         return {"status": "scanning", "candidates": []}
 
