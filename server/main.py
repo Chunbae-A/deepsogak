@@ -122,8 +122,13 @@ def _run_protection_job(job_id: str, raw: bytes, image_format: str, original_pat
         image.load()
 
         # EXIF·GPS 메타데이터 제거: 픽셀 데이터만 가진 새 이미지에 다시 담아 저장한다.
-        clean_image = Image.new(image.mode, image.size)
-        clean_image.putdata(list(image.getdata()))
+        # image.mode를 그대로 써서 새 이미지를 만들면 팔레트(P) 모드 PNG에서
+        # 원본 팔레트를 안 가져와(Image.new는 빈 팔레트로 시작) 픽셀이 전부
+        # 검은색으로 깨진다 — RGB로 먼저 변환해 팔레트 의존성을 없앤다.
+        # 어차피 deepbaeksin도, 최종 저장도 RGB 기준이라 정보 손실은 없다.
+        rgb_image = image.convert("RGB")
+        clean_image = Image.new("RGB", rgb_image.size)
+        clean_image.putdata(list(rgb_image.getdata()))
 
         # 딥백신: ArcFace 임베딩을 타깃으로 한 적대적 노이즈 적용을 시도한다.
         # 얼굴이 없거나 모델을 쓸 수 없으면 예외 없이 원본(EXIF만 제거된 상태)을
