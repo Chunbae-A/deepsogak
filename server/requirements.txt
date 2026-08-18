@@ -6,6 +6,7 @@ imagehash
 requests
 python-dotenv
 numpy
+scipy
 scikit-image
 onnxruntime
 insightface

@@ -150,6 +150,39 @@ class ApplyDeepbaeksinTestCase(unittest.TestCase):
         max_change = np.max(np.abs(protected_array - original_array))
         self.assertLessEqual(max_change, 8.0 + 1e-6)
 
+    def test_block_edges_are_smoothed_not_left_as_a_hard_step(self):
+        """블록 경계에 인접한 두 블록이 각각 +epsilon/-epsilon으로 끝나면
+        스무딩 없이는 경계에서 최대 2*epsilon(16)짜리 급격한 단차가 생긴다.
+        스무딩 후에는 인접 픽셀 간 차이가 그보다 뚜렷하게 작아야 한다."""
+        size = 96
+        fake_app = _FakeFaceApp(has_face=True, image_size=size)
+        rng = np.random.default_rng(3)
+        noise = rng.integers(100, 160, size=(size, size, 3), dtype=np.uint8)
+        image = Image.fromarray(noise, mode="RGB")
+
+        with patch.object(deepbaeksin, "_get_face_apps", return_value={"fake_model": fake_app}):
+            protected, meta = deepbaeksin.apply_deepbaeksin(
+                image,
+                epsilon=8,
+                max_iterations=120,
+                block_size=24,
+                ssim_floor=0.97,
+                time_budget_seconds=30.0,
+                seed=4,
+            )
+
+        self.assertGreater(meta["iterationsRun"], 0)
+        original_array = np.asarray(image.convert("RGB"), dtype=np.float32)
+        protected_array = np.asarray(protected, dtype=np.float32)
+        delta = protected_array - original_array
+
+        horizontal_jumps = np.abs(np.diff(delta, axis=1))
+        vertical_jumps = np.abs(np.diff(delta, axis=0))
+        max_adjacent_jump = max(horizontal_jumps.max(), vertical_jumps.max())
+        # 스무딩이 없다면 인접 블록의 +epsilon/-epsilon 경계에서 이론상
+        # 2*epsilon(16)까지 튈 수 있다. 스무딩 후에는 그보다 뚜렷하게 작아야 한다.
+        self.assertLess(max_adjacent_jump, 12.0)
+
     def test_epsilon_zero_means_no_visible_change_possible(self):
         size = 64
         fake_app = _FakeFaceApp(has_face=True, image_size=size)
