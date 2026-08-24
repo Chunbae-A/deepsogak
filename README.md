@@ -2,13 +2,19 @@
 
 딥소각은 공개 웹에서 본인 얼굴이 포함된 후보를 찾고, 동일인 여부와 딥페이크 의심 여부를 분석해 대응 자료 작성을 돕는 서비스입니다.
 
+## 프로젝트 상태
+
+**2026년 제8회 K-디지털 트레이닝 해커톤 아이디어상 수상으로 프로젝트를 마무리합니다.** 이 저장소는 예선심사부터 실제 동작하는 서비스까지 진행한 결과물입니다. 심사에 제출한 기획안은 [`docs/`](docs/)에서 확인할 수 있습니다.
+
 ## 저장소 구성
 
 | 경로 | 역할 |
 |---|---|
+| [`docs/`](docs/) | 해커톤 예선심사 제출 기획안 |
 | [`app/`](app/) | Expo 기반 사용자 앱 |
 | [`server/`](server/) | 보호·모니터링·신고 흐름을 제공하는 FastAPI 서버 |
 | [`services/faceguard-model-api/`](services/faceguard-model-api/) | ArcFace 얼굴 비교와 EfficientNet-B4 ONNX 딥페이크 분석 API |
+| [`training/`](training/) | 딥페이크 판별 모델(EfficientNet-B4) 학습 파이프라인 |
 
 앱과 기존 서버의 실행 방법은 각 디렉터리의 설정을 따릅니다. 모델 API를 처음 실행하는 사람은 [모델 API 시작 안내](services/faceguard-model-api/README.md)를 확인하세요.
 
